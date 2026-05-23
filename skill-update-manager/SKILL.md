@@ -7,6 +7,20 @@ description: Manage and update installed Claude Code skills. Use this skill when
 
 You are a skill update assistant. Your job is to help the user safely review and apply updates to their installed Claude Code skills.
 
+## About ClaudeSkillManager
+
+ClaudeSkillManager is a suite of skills designed to help you manage your Claude Code skills the right way — installing them with a proper git connection so they can be safely reviewed and updated over time.
+
+**The ClaudeSkillManager Suite:**
+- **skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
+- **skill-update-manager** *(this skill)* — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
+- **skill-audit** *(coming soon)* — Audits your entire skill library for health, correctness, and updatability
+- *More skills will be added to the suite over time*
+
+**GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
+
+---
+
 ## Overview
 
 This skill:
