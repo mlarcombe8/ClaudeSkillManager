@@ -81,10 +81,20 @@ Always clone and verify *before* removing anything, so a failed clone never leav
 
 ### STEP 1 — Identify the Skill Source
 
-Ask the user for the GitHub URL or skill name if not already provided. If only a name is given, search for it:
-- Check `~/.claude/skills/` for a symlink and `~/.agents/skills/` for an existing install
-- If not found locally, search GitHub (`gh search repos "<name>"`, and `gh api users/<author>/repos` if an author was named) and confirm the match by comparing the repo's description/SKILL.md to what was requested
-- If still unknown, ask the user for the GitHub URL
+Ask the user for the GitHub URL or skill name if not already provided.
+
+**If the user gives a name or description rather than a GitHub URL, search for matching skills before proceeding:**
+- Check `~/.claude/skills/` for a symlink and `~/.agents/skills/` for an existing install.
+- Search the open skills ecosystem with the Skills CLI:
+  ```bash
+  npx skills find <query>
+  ```
+  Present the matches to the user with each candidate's **install count**, **source/author**, and **GitHub stars**, plus a one-line description, so they can choose the right one. (The chosen skill then gets vetted in STEP 2.5.)
+- Also search GitHub directly (`gh search repos "<name>"`, and `gh api users/<author>/repos` if an author was named) and confirm the match by comparing the repo's description/SKILL.md to what was requested.
+- **Community validation:** popular, battle-tested skills are ranked by total installs on the **skills.sh leaderboard** (https://skills.sh/). Check it to see whether a well-known skill already covers the user's need.
+- If still unknown, ask the user for the GitHub URL.
+
+Confirm the specific skill and its source repo with the user before continuing.
 
 ### STEP 2 — Check if Already Installed
 
@@ -102,6 +112,31 @@ git -C "$real" rev-parse --show-toplevel 2>/dev/null && echo "(git-managed)" || 
 
 - If `--show-toplevel` returns a path, the skill is **git-managed**; that path is the repo root. If that repo backs *more than one* installed skill, it's a **multi-skill repo** — see STEP 3.
 - **Branch based on result — see decision tree below.**
+
+---
+
+### STEP 2.5 — Reputation & Community Validation
+
+Before installing **any** skill, vet how trustworthy and well-regarded it is, then present your findings to the user. This is a *trust* gate that runs ahead of the code-level **Security Scan in STEP 4** — the two are complementary: reputation tells you whether the author and skill are credible; the STEP 4 scan inspects what the code actually does. Both must pass.
+
+Check and report:
+- **Install count** — prefer skills with **1K+ installs**. Treat anything under ~100 installs with caution and say so explicitly.
+- **Source reputation** — official / well-known sources (e.g. `vercel-labs`, `anthropics`, `microsoft`) are trustworthy. **Flag unknown or unverified authors.**
+- **GitHub stars** — check the source repo and **flag any repo with under 100 stars** as low-signal and worth extra scrutiny.
+- **Community validation** — cross-check the **skills.sh leaderboard** (https://skills.sh/), which ranks skills by total installs. Appearing there is a good sign; absence isn't disqualifying but is worth noting.
+
+Gather these from the Skills CLI search output (STEP 1) and/or GitHub:
+```bash
+gh repo view <owner>/<repo> --json stargazerCount,description,url
+```
+
+Present a concise summary, e.g.:
+> Reputation check for **<skill>** (`<owner>/<repo>`): 185K installs · source `vercel-labs` (trusted) · 1.2K★ · listed on skills.sh. ✅ Looks reputable.
+
+or, when something is off:
+> ⚠️ Reputation check for **<skill>** (`<owner>/<repo>`): ~40 installs · unknown author · 12★ · not on the leaderboard. Low-signal — proceed only if you trust the source.
+
+If any signal is weak, **ask the user whether to continue** before moving on. This validation matters most when an install or reinstall will actually happen (Decision Tree cases B1 and C below); if the skill is already correctly installed (case A), no install occurs and this gate can be skipped.
 
 ---
 
@@ -191,6 +226,8 @@ Wait for the selection before proceeding to STEP 4.
 ---
 
 ## STEP 4 — Security Scan
+
+This code-level scan complements the **Reputation & Community Validation (STEP 2.5)**: reputation vets the author and popularity; this scan vets what the code actually does. Run both — a skill can be popular and still ship risky code.
 
 Before installing, read each selected SKILL.md and any scripts in the repo and perform a security review:
 
