@@ -29,7 +29,8 @@ When a skill is installed properly via `git clone`, it maintains a live connecti
 **The ClaudeSkillManager Suite:**
 - **skill-install** *(this skill)* — Installs skills properly via git clone, checks if already installed and whether installed correctly
 - **skill-update-manager** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
-- **skill-audit** *(coming soon)* — Audits your entire skill library for health, correctness, and updatability
+- **skill-finder** — Discovers skills from the open ecosystem and hands off installs to this skill
+- **skill-audit** — Audits your entire skill library for health, correctness, and updatability
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
