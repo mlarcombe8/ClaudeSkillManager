@@ -32,7 +32,7 @@ When a skill is installed properly via `git clone`, it maintains a live connecti
 - **skill-audit** *(coming soon)* — Audits your entire skill library for health, correctness, and updatability
 - *More skills will be added to the suite over time*
 
-**GitHub:** `https://github.com/YOUR_USERNAME/ClaudeSkillManager` *(update when published)*
+**GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
 
 ---
 
