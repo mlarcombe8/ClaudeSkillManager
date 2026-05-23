@@ -1,5 +1,5 @@
 ---
-name: skill-update-manager
+name: csm-skill-update
 description: Manage and update installed Claude Code skills. Use this skill whenever the user wants to update their skills, check for skill updates, review what changed in a skill, audit skill security, or manage which skills are up to date. Trigger on phrases like "update my skills", "check for skill updates", "update skills", "what's new in my skills", or "skill updates".
 ---
 
@@ -12,10 +12,10 @@ You are a skill update assistant. Your job is to help the user safely review and
 ClaudeSkillManager is a suite of skills designed to help you manage your Claude Code skills the right way — installing them with a proper git connection so they can be safely reviewed and updated over time.
 
 **The ClaudeSkillManager Suite:**
-- **skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
-- **skill-update-manager** *(this skill)* — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
-- **skill-finder** — Discovers skills from the open ecosystem and hands off installs to skill-install
-- **skill-audit** — Audits your entire skill library for health, correctness, and updatability
+- **csm-skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
+- **csm-skill-update** *(this skill)* — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
+- **csm-skill-finder** — Discovers skills from the open ecosystem and hands off installs to csm-skill-install
+- **csm-skill-audit** — Audits your entire skill library for health, correctness, and updatability
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
@@ -51,7 +51,7 @@ This skill:
 Run the discovery script:
 
 ```bash
-python3 ~/.claude/skills/skill-update-manager/scripts/discover.py
+python3 ~/.claude/skills/csm-skill-update/scripts/discover.py
 ```
 
 It outputs JSON with two top-level lists:
@@ -61,14 +61,14 @@ It outputs JSON with two top-level lists:
 Present a clean summary to the user, **grouped by repo**:
 - Repo name + remote, commits behind, last updated.
 - For a **multi-skill repo**, list the member skills it provides and note: *"updating this repo updates all N of these skills together."*
-- List `non_git_skills` separately as "cannot be auto-updated — reinstall via /skill-install to manage them."
+- List `non_git_skills` separately as "cannot be auto-updated — reinstall via /csm-skill-install to manage them."
 
 If no repo has updates available, tell the user everything is up to date and stop (after handling any single-skill-target confirmation below, if relevant).
 
 ### STEP 1b — Targeting a single skill in a multi-skill repo (MANDATORY ASK)
 
-If the user asked to update **one specific skill** (e.g. `/skill-update-manager brandkit`):
-1. Find which repo backs it (the repo whose `skills[].install_name` matches). If `non_git`, tell them it can't be auto-updated and offer `/skill-install`.
+If the user asked to update **one specific skill** (e.g. `/csm-skill-update brandkit`):
+1. Find which repo backs it (the repo whose `skills[].install_name` matches). If `non_git`, tell them it can't be auto-updated and offer `/csm-skill-install`.
 2. **If that repo is multi-skill (`is_multi_skill: true`), you MUST ask before proceeding** — updating is a whole-repo `git pull`, so siblings update too. Use `AskUserQuestion`:
    > "`<skill>` is part of the multi-skill repo `<repo>`, which also provides: `<other skills>`. Updating pulls the whole repo, so **all of these update together** — they can't be updated individually. How do you want to proceed?"
    - **Update the whole repo** (all member skills) — the only way to apply the update; recommended.
@@ -158,8 +158,8 @@ After applying updates, remind the user to start a new Claude Code session for t
 ## Edge Cases
 
 - **Multi-skill repo** — updates are per-repo; you cannot update one member without the others. Always confirm the whole-repo consequence first (STEP 1b).
-- **Not a git repo** — appears under `non_git_skills`; report as "cannot be auto-updated" and offer to convert it via `/skill-install`.
-- **Merge conflicts / non-fast-forward** — `git pull --ff-only` fails. Do not attempt to resolve or force; tell the user to resolve manually (or reinstall via `/skill-install` to reset to a clean clone).
+- **Not a git repo** — appears under `non_git_skills`; report as "cannot be auto-updated" and offer to convert it via `/csm-skill-install`.
+- **Merge conflicts / non-fast-forward** — `git pull --ff-only` fails. Do not attempt to resolve or force; tell the user to resolve manually (or reinstall via `/csm-skill-install` to reset to a clean clone).
 - **Customized local files** — if the user edited files inside a git-managed clone, a pull may conflict. Warn them; suggest stashing or reinstalling.
 - **Private repos** — if fetch/pull fails due to auth, note it and skip.
 - **Large diffs (>500 lines)** — summarize by file/subpath rather than line-by-line, and flag for manual review.

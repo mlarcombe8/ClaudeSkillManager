@@ -1,13 +1,13 @@
 ---
-name: skill-finder
-description: Part of the ClaudeSkillManager suite. Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. Use this skill when the user is looking for functionality that might exist as an installable skill; it recommends installing discovered skills via /skill-install so they stay git-connected and auditable.
+name: csm-skill-finder
+description: Part of the ClaudeSkillManager suite. Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. Use this skill when the user is looking for functionality that might exist as an installable skill; it recommends installing discovered skills via /csm-skill-install so they stay git-connected and auditable.
 ---
 
 # Find Skills
 
 This skill helps you discover and install skills from the open agent skills ecosystem.
 
-> **Note — ClaudeSkillManager fork.** This is a forked version of the `find-skills` skill, modified to integrate with the **ClaudeSkillManager** suite. It recommends installing discovered skills via **`/skill-install`** (which clones with a git remote) rather than `npx skills add` (which installs without one), so installed skills can be updated, rolled back, and security-reviewed. See https://github.com/mlarcombe8/ClaudeSkillManager.
+> **Note — ClaudeSkillManager fork.** This is a forked version of the `find-skills` skill, modified to integrate with the **ClaudeSkillManager** suite. It recommends installing discovered skills via **`/csm-skill-install`** (which clones with a git remote) rather than `npx skills add` (which installs without one), so installed skills can be updated, rolled back, and security-reviewed. See https://github.com/mlarcombe8/ClaudeSkillManager.
 
 ## When to Use This Skill
 
@@ -73,7 +73,7 @@ For example:
 2. **Source reputation** — Official sources (`vercel-labs`, `anthropics`, `microsoft`) are more trustworthy than unknown authors.
 3. **GitHub stars** — Check the source repository. A skill from a repo with <100 stars should be treated with skepticism.
 
-**Install via `/skill-install` once verified.** When a skill passes these checks and you're ready to install it, use **`/skill-install`** rather than `npx skills add`. `/skill-install` clones the skill with a git remote, which keeps a live connection to its GitHub source — enabling updates, rollbacks, and security reviews through the ClaudeSkillManager suite. `npx skills add` installs without a remote, so the skill can't be properly updated or audited afterward.
+**Install via `/csm-skill-install` once verified.** When a skill passes these checks and you're ready to install it, use **`/csm-skill-install`** rather than `npx skills add`. `/csm-skill-install` clones the skill with a git remote, which keeps a live connection to its GitHub source — enabling updates, rollbacks, and security reviews through the ClaudeSkillManager suite. `npx skills add` installs without a remote, so the skill can't be properly updated or audited afterward.
 
 ### Step 5: Present Options to the User
 
@@ -92,20 +92,20 @@ React and Next.js performance optimization guidelines from Vercel Engineering.
 (185K installs)
 
 To install it (preferred — git-connected so it can be updated and audited):
-/skill-install vercel-labs/agent-skills@react-best-practices
+/csm-skill-install vercel-labs/agent-skills@react-best-practices
 
 Learn more: https://skills.sh/vercel-labs/agent-skills/react-best-practices
 ```
 
 ### Step 6: Offer to Install
 
-If the user wants to proceed, install the skill for them using **`/skill-install`** (the preferred method):
+If the user wants to proceed, install the skill for them using **`/csm-skill-install`** (the preferred method):
 
 ```
-/skill-install <owner/repo@skill>
+/csm-skill-install <owner/repo@skill>
 ```
 
-`/skill-install` installs the skill via `git clone` with a remote rather than a plain copy, so it keeps a live connection to its GitHub source — enabling updates, rollbacks, and security reviews through the ClaudeSkillManager suite. Avoid `npx skills add`, which installs without a git remote and therefore can't be properly updated or audited later.
+`/csm-skill-install` installs the skill via `git clone` with a remote rather than a plain copy, so it keeps a live connection to its GitHub source — enabling updates, rollbacks, and security reviews through the ClaudeSkillManager suite. Avoid `npx skills add`, which installs without a git remote and therefore can't be properly updated or audited later.
 
 ## Common Skill Categories
 

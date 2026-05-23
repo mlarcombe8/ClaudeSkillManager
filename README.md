@@ -10,10 +10,10 @@ When a skill is installed by a plain file copy or download, it lives on your mac
 
 | Skill | What it does |
 | --- | --- |
-| [`skill-install`](skill-install/) | Installs Claude Code skills via `git clone` with a remote. Triggers on "install skill", "add skill", "get skill", "set up X". |
-| [`skill-update-manager`](skill-update-manager/) | Scans installed skills, groups them by the git repo that backs them, fetches and diffs available updates, summarizes changes in plain English, flags security concerns, and applies only the updates you approve. |
-| [`skill-finder`](skill-finder/) | Discovers skills from the open ecosystem (`npx skills find`, the skills.sh leaderboard), vets candidates by install count/source/stars, and hands off installs to `/skill-install`. |
-| [`skill-audit`](skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Read-only — it hands off fixes to `skill-install`/`skill-update-manager`. |
+| [`csm-skill-install`](csm-skill-install/) | Installs Claude Code skills via `git clone` with a remote. Triggers on "install skill", "add skill", "get skill", "set up X". |
+| [`csm-skill-update`](csm-skill-update/) | Scans installed skills, groups them by the git repo that backs them, fetches and diffs available updates, summarizes changes in plain English, flags security concerns, and applies only the updates you approve. |
+| [`csm-skill-finder`](csm-skill-finder/) | Discovers skills from the open ecosystem (`npx skills find`, the skills.sh leaderboard), vets candidates by install count/source/stars, and hands off installs to `/csm-skill-install`. |
+| [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
 
 ## Installation
 
@@ -29,17 +29,17 @@ Each subfolder is a self-contained skill (each has its own `SKILL.md`). Claude C
 
 ```
 ClaudeSkillManager/
-├── skill-install/
+├── csm-skill-install/
 │   ├── SKILL.md
 │   └── references/
-├── skill-update-manager/
+├── csm-skill-update/
 │   ├── SKILL.md
 │   ├── references/
 │   └── scripts/
-├── skill-finder/
+├── csm-skill-finder/
 │   ├── SKILL.md
 │   └── references/        # incl. upstream-baseline.md for drift detection
-└── skill-audit/
+└── csm-skill-audit/
     ├── SKILL.md
     └── scripts/           # audit.py (read-only health scan → JSON)
 ```

@@ -1,5 +1,5 @@
 ---
-name: skill-audit
+name: csm-skill-audit
 description: Audit the health of your installed Claude Code skills. Use this skill when the user wants to check their skill library's health, run a skill audit, find broken or misconfigured skills, check for drift from upstream, see a skill health score, or clean up orphaned skill files. Trigger on phrases like "audit my skills", "skill health check", "are my skills healthy", "check my skill library", "what's wrong with my skills", or "skill audit".
 ---
 
@@ -12,10 +12,10 @@ You are a skill auditor. Your job is to scan the user's installed Claude Code sk
 ClaudeSkillManager is a suite of skills designed to help you manage your Claude Code skills the right way — installing them with a proper git connection so they can be safely reviewed and updated over time.
 
 **The ClaudeSkillManager Suite:**
-- **skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
-- **skill-update-manager** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
-- **skill-finder** — Discovers skills from the open ecosystem and hands off to `/skill-install`
-- **skill-audit** *(this skill)* — Audits your entire skill library for health, correctness, and updatability
+- **csm-skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
+- **csm-skill-update** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
+- **csm-skill-finder** — Discovers skills from the open ecosystem and hands off to `/csm-skill-install`
+- **csm-skill-audit** *(this skill)* — Audits your entire skill library for health, correctness, and updatability
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
@@ -41,7 +41,7 @@ The output is a **health score (0–100)** plus findings in three buckets:
 ## Execution Safety — REPORT ONLY
 
 - **Never fix anything automatically.** This skill does not install, reinstall, update, pull, move, delete, relink, or edit. It scans and reports, full stop.
-- All remediation is a **handoff**: tell the user which suite skill to run (`/skill-install` or `/skill-update-manager`) and let them decide. Never run those actions from here.
+- All remediation is a **handoff**: tell the user which suite skill to run (`/csm-skill-install` or `/csm-skill-update`) and let them decide. Never run those actions from here.
 - For info-level cleanup (orphaned files/dirs), you may *describe* what could be removed, but **do not delete anything** — the user removes it themselves if they choose.
 - The script never hides errors (`2>/dev/null`) and is read-only; if it reports problems in its `errors` array, surface them rather than guessing.
 - Don't assume bash 4+ or a specific shell; the script is plain Python 3 and stdlib-only, so just run it with `python3`.
@@ -53,7 +53,7 @@ The output is a **health score (0–100)** plus findings in three buckets:
 ### STEP 1 — Run the audit script
 
 ```bash
-python3 ~/.claude/skills/skill-audit/scripts/audit.py
+python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
 ```
 
 - This fetches each git-backed repo to check whether it's behind. If the user is offline or wants a fast local-only pass, add `--no-fetch` (then "behind on updates" is reported as *unknown* rather than a number).
@@ -87,7 +87,7 @@ Go through `findings.critical`, then `findings.warning`, then `findings.info`. *
 
 🟡 WARNINGS
   • Behind on updates — impeccable (3 commits behind origin/main)
-  • Drift from upstream baseline — skill-finder (20 lines differ; expected if you forked it)
+  • Drift from upstream baseline — csm-skill-finder (20 lines differ; expected if you forked it)
 
 🔵 INFO
   • Orphaned directory — ~/.claude/skills/data (2.8 MB, not a skill; safe to remove)
@@ -96,7 +96,7 @@ Go through `findings.critical`, then `findings.warning`, then `findings.info`. *
 ```
 
 Notes on interpreting specific findings:
-- **drift** — expected when a skill was intentionally forked/customized (e.g. `skill-finder`). Frame it as "diverged from its recorded baseline by N lines — fine if intentional." Only alarming if the user didn't customize it.
+- **drift** — expected when a skill was intentionally forked/customized (e.g. `csm-skill-finder`). Frame it as "diverged from its recorded baseline by N lines — fine if intentional." Only alarming if the user didn't customize it.
 - **no_git** ("installed without git") — these came from `npx skills add` or a manual copy; they work but can't be updated/audited. This is the suite's core motivation.
 - **orphaned_file / orphaned_dir** — stray content in `~/.claude/skills` (e.g. leftover `data/`, `scripts/`, or a loose `SKILL.md` from an old flat install). Ignored by Claude Code; safe for the user to delete.
 
@@ -106,15 +106,15 @@ Map findings to the right suite skill using each finding's `handoff` field, and 
 
 | Finding | Hand off to |
 | --- | --- |
-| `broken_symlink`, `missing_skillmd`, `no_remote`, `no_git` | **`/skill-install`** — reinstall properly (fresh git clone with a remote) |
-| `behind` | **`/skill-update-manager`** — review the diff and apply the update |
+| `broken_symlink`, `missing_skillmd`, `no_remote`, `no_git` | **`/csm-skill-install`** — reinstall properly (fresh git clone with a remote) |
+| `behind` | **`/csm-skill-update`** — review the diff and apply the update |
 | `drift` | Manual review — compare `SKILL.md` to `references/upstream-baseline.md` if the change was unexpected |
 | `orphaned_file`, `orphaned_dir`, `orphaned_clone` | Optional cleanup the user can do themselves (this skill won't delete anything) |
 | `storage`, `suite_version` | Informational only |
 
 End with a clear, non-pushy handoff, e.g.:
 
-> To fix the items above: run **/skill-install** to reconnect the 2 npx-installed skills, and **/skill-update-manager** to apply the pending update to `impeccable`. I won't make any changes from here — these are yours to run when ready.
+> To fix the items above: run **/csm-skill-install** to reconnect the 2 npx-installed skills, and **/csm-skill-update** to apply the pending update to `impeccable`. I won't make any changes from here — these are yours to run when ready.
 
 If everything is clean (no critical or warning findings), congratulate the user and note the score.
 
@@ -143,14 +143,14 @@ If everything is clean (no critical or warning findings), congratulate the user 
 }
 ```
 
-Each finding is `{ "id", "title", "detail", "skills": [names], "handoff": "/skill-install" | "/skill-update-manager" | null }`.
+Each finding is `{ "id", "title", "detail", "skills": [names], "handoff": "/csm-skill-install" | "/csm-skill-update" | null }`.
 
 ---
 
 ## Edge Cases
 
 - **Offline / fetch fails** — `commits_behind` is `null` (unknown) and the reason lands in `errors`. Report update status as "couldn't check (offline?)" rather than "up to date".
-- **Multi-skill repo** — several installed skills share one repo root; a single `behind` finding lists all of them, because one `git pull` would move them together (consistent with skill-update-manager).
+- **Multi-skill repo** — several installed skills share one repo root; a single `behind` finding lists all of them, because one `git pull` would move them together (consistent with csm-skill-update).
 - **Directly-installed skills** (a real folder with a `SKILL.md`, not a symlink) — counted as skills; if not git-backed they surface under `no_git`.
 - **Non-skill content in `~/.claude/skills`** — loose files and `SKILL.md`-less directories are reported as orphaned info, never as critical "missing SKILL.md".
 - **No skills installed** — the script still returns valid JSON with an empty `skills` list; report that nothing is installed.

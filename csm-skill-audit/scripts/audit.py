@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-skill-audit data-gathering script for the ClaudeSkillManager suite.
+csm-skill-audit data-gathering script for the ClaudeSkillManager suite.
 
 Scans installed Claude Code skills and emits a single JSON document describing
 the health of the skill library. It is READ-ONLY: it never installs, updates,
 moves, deletes, or otherwise modifies anything. Interpretation, presentation,
 and any fixes are left to Claude (see SKILL.md), which only ever hands off to
-/skill-install or /skill-update-manager — it does not fix things itself.
+/csm-skill-install or /csm-skill-update — it does not fix things itself.
 
 Severity model
 --------------
@@ -52,7 +52,7 @@ SCHEMA_VERSION = 1
 
 
 # --------------------------------------------------------------------------- #
-# Small helpers (mirrors the style of skill-update-manager/scripts/discover.py)
+# Small helpers (mirrors the style of csm-skill-update/scripts/discover.py)
 # --------------------------------------------------------------------------- #
 def run(cmd, cwd=None, timeout=None):
     """Run a shell command and return (stdout, stderr, returncode)."""
@@ -354,7 +354,7 @@ def main():
                 "Broken symlink",
                 "%s -> %s (target does not exist)" % (s["link_path"], s["real_path"]),
                 [s["install_name"]],
-                handoff="/skill-install",
+                handoff="/csm-skill-install",
             ))
         elif not s["skillmd_present"]:
             bump(s, "critical")
@@ -363,7 +363,7 @@ def main():
                 "Missing SKILL.md",
                 "No SKILL.md found at %s" % s["real_path"],
                 [s["install_name"]],
-                handoff="/skill-install",
+                handoff="/csm-skill-install",
             ))
 
     # --- Group healthy-enough skills by backing repo ----------------------- #
@@ -400,10 +400,10 @@ def main():
             "no_git",
             "Installed without git (npx skills add / manual copy)",
             "These skills are not backed by a git repo, so they can't be updated, "
-            "diffed, rolled back, or audited for changes. Reinstall via /skill-install "
+            "diffed, rolled back, or audited for changes. Reinstall via /csm-skill-install "
             "to give them a git connection.",
             names,
-            handoff="/skill-install",
+            handoff="/csm-skill-install",
         ))
 
     # --- Warning: no git remote / behind on updates (per repo) ------------- #
@@ -419,9 +419,9 @@ def main():
                 "no_remote",
                 "No git remote",
                 "Repo '%s' is a git repo but has no 'origin' remote, so updates "
-                "can't be fetched. Reinstall via /skill-install to reconnect it." % repo_name,
+                "can't be fetched. Reinstall via /csm-skill-install to reconnect it." % repo_name,
                 names,
-                handoff="/skill-install",
+                handoff="/csm-skill-install",
             ))
             continue
 
@@ -436,12 +436,12 @@ def main():
                 "behind",
                 "Behind on updates",
                 "Repo '%s' is %d commit(s) behind origin/%s. Review and apply via "
-                "/skill-update-manager.%s" % (
+                "/csm-skill-update.%s" % (
                     repo_name, behind, status["branch"],
                     " Updating pulls all of: %s." % ", ".join(names) if len(names) > 1 else "",
                 ),
                 names,
-                handoff="/skill-update-manager",
+                handoff="/csm-skill-update",
             ))
 
     # --- Warning: drift vs upstream baseline ------------------------------- #

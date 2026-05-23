@@ -1,9 +1,9 @@
 ---
-name: skill-install
+name: csm-skill-install
 description: Install Claude Code skills properly via git clone with a remote. Use this skill whenever the user wants to install a new skill, add a skill, get a skill, or set up a skill from GitHub. Also use when a user mentions a skill by name and wants to use it. Trigger on phrases like "install skill", "add skill", "get skill", "install X skill", "set up X".
 ---
 
-# skill-install
+# csm-skill-install
 
 Part of the **ClaudeSkillManager Suite** — a set of skills for installing, updating, and auditing Claude Code skills properly.
 
@@ -27,10 +27,10 @@ When a skill is installed properly via `git clone`, it maintains a live connecti
 - The full suite of ClaudeSkillManager tools can manage it
 
 **The ClaudeSkillManager Suite:**
-- **skill-install** *(this skill)* — Installs skills properly via git clone, checks if already installed and whether installed correctly
-- **skill-update-manager** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
-- **skill-finder** — Discovers skills from the open ecosystem and hands off installs to this skill
-- **skill-audit** — Audits your entire skill library for health, correctness, and updatability
+- **csm-skill-install** *(this skill)* — Installs skills properly via git clone, checks if already installed and whether installed correctly
+- **csm-skill-update** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
+- **csm-skill-finder** — Discovers skills from the open ecosystem and hands off installs to this skill
+- **csm-skill-audit** — Audits your entire skill library for health, correctness, and updatability
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
@@ -153,7 +153,7 @@ root=$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)
 If a remote exists → tell the user:
 > "This skill is already installed and set up correctly with a git connection to GitHub. No reinstall needed."
 
-If the repo is a multi-skill repo, note that the same clone manages its sibling skills too. Offer to update it via skill-update-manager instead.
+If the repo is a multi-skill repo, note that the same clone manages its sibling skills too. Offer to update it via csm-skill-update instead.
 
 ---
 
@@ -174,7 +174,7 @@ If source is found → offer to reinstall properly:
 > "I found the original source at [URL]. Would you like me to reinstall this skill properly? Your existing skill files will be replaced with a fresh git clone. Note: if you've made any custom changes to the skill files, those will be lost."
 
 - If **yes** → proceed to STEP 3 (Install). If the source turns out to be a multi-skill repo, follow the multi-skill scope question there.
-- If **no** → offer to run skill-update-manager to check for any available updates instead, noting that full update functionality will be limited without a git remote
+- If **no** → offer to run csm-skill-update to check for any available updates instead, noting that full update functionality will be limited without a git remote
 
 **B2 — Cannot be fixed (no findable GitHub source):**
 
@@ -183,10 +183,10 @@ Tell the user:
 
 Explain what this means practically:
 - Updates cannot be automatically checked or applied
-- skill-update-manager will flag it as "cannot be auto-updated"
+- csm-skill-update will flag it as "cannot be auto-updated"
 - The skill will still work normally — it just can't be managed by the suite
 
-Offer to run skill-update-manager anyway to confirm its status in the suite.
+Offer to run csm-skill-update anyway to confirm its status in the suite.
 
 ---
 
@@ -304,7 +304,7 @@ cd ~/.agents/skills/<repo_name> && git remote -v && git log -1 --oneline
 Confirm: each symlink resolves, each `name:` matches its install name, any replaced non-git folders are gone, and the clone has a working `origin` remote. Report results clearly.
 
 Then tell the user:
-> "Installation complete. Start a new Claude Code session to use the skill(s). You can run /skill-update-manager at any time to check for updates."
+> "Installation complete. Start a new Claude Code session to use the skill(s). You can run /csm-skill-update at any time to check for updates."
 
 ---
 
