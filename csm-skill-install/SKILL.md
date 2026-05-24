@@ -31,6 +31,7 @@ When a skill is installed properly via `git clone`, it maintains a live connecti
 - **csm-skill-update** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
 - **csm-skill-finder** — Discovers skills from the open ecosystem and hands off installs to this skill
 - **csm-skill-audit** — Audits your entire skill library for health and updatability, plus an optional deep security scan of skill contents
+- **csm-skill-rollback** — Rolls an installed skill back to a previous version, showing a diff and a security check of the target first
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`

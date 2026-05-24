@@ -176,6 +176,7 @@ def read_activity():
         "last_install": None,
         "last_update_check": None,
         "last_security_scan": None,
+        "last_rollback": None,
     }
     if not info["log_exists"]:
         return info
@@ -211,6 +212,12 @@ def read_activity():
             info["last_security_scan"] = {
                 "date": date, "timestamp": ts,
                 "skills_scanned": ss,
+                "details": e.get("details", ""),
+            }
+        elif action == "rolled-back":
+            info["last_rollback"] = {
+                "skill": e.get("skill"), "date": date, "timestamp": ts,
+                "to_commit": e.get("to_commit"), "from_commit": e.get("from_commit"),
                 "details": e.get("details", ""),
             }
     return info

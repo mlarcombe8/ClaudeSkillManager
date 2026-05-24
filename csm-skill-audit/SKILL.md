@@ -16,6 +16,7 @@ ClaudeSkillManager is a suite of skills designed to help you manage your Claude 
 - **csm-skill-update** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
 - **csm-skill-finder** — Discovers skills from the open ecosystem and hands off to `/csm-skill-install`
 - **csm-skill-audit** *(this skill)* — Audits your entire skill library for health and updatability, plus an optional **deep security scan** that statically analyzes each skill's contents
+- **csm-skill-rollback** — Rolls an installed skill back to a previous version, showing a diff and a security check of the target first
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
@@ -86,11 +87,13 @@ python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
    Last install:        impeccable on 2026-05-24
    Last update check:   2026-05-23
    Last security scan:  2026-05-22 (19 skills scanned)
+   Last rollback:       impeccable on 2026-05-21
 ```
 
 - **Last install** → `activity.last_install.skill` + `date`.
 - **Last update check** → `activity.last_update_check.date`.
 - **Last security scan** → `activity.last_security_scan.date`, plus `(N skills scanned)` from `skills_scanned` (drop the parenthetical if it's `null`).
+- **Last rollback** → `activity.last_rollback.skill` + `date`.
 
 **Then** lead with the health score and a one-line verdict, then the counts. Example:
 
@@ -268,7 +271,8 @@ python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
   "activity": { "log_path", "log_exists", "entries",
                 "last_install": { "skill", "date", "action" } | null,
                 "last_update_check": { "date" } | null,
-                "last_security_scan": { "date", "skills_scanned" } | null },
+                "last_security_scan": { "date", "skills_scanned" } | null,
+                "last_rollback": { "skill", "date", "to_commit", "from_commit" } | null },
   "skills":  [ { "install_name", "declared_name", "link_path", "real_path",
                  "is_symlink", "link_ok", "skillmd_present",
                  "git": { "is_repo", "repo_root", "has_remote", "remote", "branch",
