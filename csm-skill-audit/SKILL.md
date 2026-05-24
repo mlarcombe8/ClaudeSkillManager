@@ -154,6 +154,7 @@ If everything is clean (no critical or warning findings), congratulate the user 
 ```bash
 python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
   --skill all --action audit-run --result success \
+  --field health_score=<score> \
   --details "Standard audit; health <score>/100 (<grade>); <C> critical / <W> warning / <I> info"
 ```
 
@@ -240,11 +241,12 @@ For each **flagged** skill (any critical/warning), offer a path — **never act 
 
 Close by reminding the user the scan is **advisory**: you've flagged what to look at, but **they decide** whether to act, and you will not modify anything.
 
-**Then log the scan** (best-effort). Keep the details phrased as "… of N skills …" so the count is machine-readable for the Suite Activity header:
+**Then log the scan** (best-effort). Pass the count as a structured `--field skills_scanned=<N>` — the Suite Activity header reads this field directly (no text parsing). `details` stays a human-readable summary:
 
 ```bash
 python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
   --skill all --action scan-run --result success \
+  --field skills_scanned=<N> --field overall_score=<score> \
   --details "Security scan of <N> skills; overall <score>/100 (<grade>); scope <all|selected>"
 ```
 

@@ -109,11 +109,12 @@ Every install, update, and audit/scan appends a line to a local **activity log**
 - **Location:** `~/.csm/csm.log` (the `~/.csm/` directory is created automatically on first write).
 - **Format:** [JSON Lines](https://jsonlines.org/) — one JSON object per line, both human-readable and easy to parse (e.g. `cat ~/.csm/csm.log | jq`).
 - **Each entry has:** `timestamp` (ISO 8601), `skill` (install name or `all`), `action` (`installed` / `reinstalled` / `skipped` / `failed` / `checked` / `updated` / `skipped-update` / `audit-run` / `scan-run`), `source` (GitHub URL where relevant), `result` (`success` / `failure` / `up-to-date`), and `details` (a short plain-English summary).
+- **Extra structured fields:** some actions attach typed fields so readers never have to parse numbers out of `details` — e.g. a `scan-run` carries `skills_scanned` (and `overall_score`), `checked` carries `updates_available`, and `updated` carries `commits`. Any skill can add fields via `csm_log.py --field NAME=VALUE`.
 
 Example line:
 
 ```json
-{"timestamp": "2026-05-24T10:30:00-04:00", "skill": "impeccable", "action": "updated", "source": "https://github.com/owner/impeccable", "result": "success", "details": "Pulled 3 commit(s) to a1b2c3d; refreshed: impeccable"}
+{"timestamp": "2026-05-24T10:30:00-04:00", "skill": "all", "action": "scan-run", "source": "", "result": "success", "skills_scanned": 19, "overall_score": 84, "details": "Security scan of 19 skills; overall 84/100 (B); scope all"}
 ```
 
 `csm-skill-audit` reads this log and prints a short **Suite Activity** summary — last install, last update check, last security scan — at the top of every audit (or "No activity logged yet" when the log is empty). The log is written by the shared `shared/csm_log.py` helper and lives **outside the repo** in your home directory; the repo's `.gitignore` also excludes `~/.csm`-style paths so a log can never be committed by accident.

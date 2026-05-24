@@ -202,10 +202,15 @@ def read_activity():
             info["last_update_check"] = {"date": date, "timestamp": ts,
                                          "details": e.get("details", "")}
         elif action == "scan-run":
-            m = re.search(r"(\d+)\s+skill", e.get("details", "") or "")
+            # Prefer the structured field; fall back to parsing the details text
+            # only for older log entries written before the field existed.
+            ss = e.get("skills_scanned")
+            if not isinstance(ss, int) or isinstance(ss, bool):
+                m = re.search(r"(\d+)\s+skill", e.get("details", "") or "")
+                ss = int(m.group(1)) if m else None
             info["last_security_scan"] = {
                 "date": date, "timestamp": ts,
-                "skills_scanned": int(m.group(1)) if m else None,
+                "skills_scanned": ss,
                 "details": e.get("details", ""),
             }
     return info

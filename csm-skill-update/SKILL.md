@@ -70,10 +70,11 @@ If no repo has updates available, tell the user everything is up to date and sto
 ```bash
 python3 ~/.claude/skills/csm-skill-update/../shared/csm_log.py \
   --skill all --action checked --result <up-to-date|success> \
+  --field skills_checked=<N> --field updates_available=<M> \
   --details "Checked <N> skills across <R> repos; <M> had updates"
 ```
 
-Use result `up-to-date` when nothing was behind, otherwise `success`.
+Use result `up-to-date` when nothing was behind, otherwise `success`. Counts go in structured `--field`s so any reader gets them without parsing `details`.
 
 ### STEP 1b — Targeting a single skill in a multi-skill repo (MANDATORY ASK)
 
@@ -166,6 +167,7 @@ git -C <repo_path> pull --ff-only
 ```bash
 python3 ~/.claude/skills/csm-skill-update/../shared/csm_log.py \
   --skill <install_name|repo_name> --action updated --source <remote_url> --result success \
+  --field commits=<N> \
   --details "Pulled <N> commit(s) to <short-sha>; refreshed: <skill list>"
 ```
 

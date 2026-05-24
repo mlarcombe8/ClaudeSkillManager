@@ -19,9 +19,14 @@ Each entry has, in this order:
   result     success | failure | up-to-date
   details    brief plain-English summary
 
+Extra structured fields can be attached with repeatable `--field NAME=VALUE`
+(e.g. `--field skills_scanned=19`), stored as JSON numbers/booleans where
+possible so readers never have to parse them out of `details`.
+
 Usage:
   python3 csm_log.py --skill <name|all> --action <action> \
-      --result <success|failure|up-to-date> [--source <url>] --details "<text>"
+      --result <success|failure|up-to-date> [--source <url>] \
+      [--field NAME=VALUE ...] --details "<text>"
 """
 
 import argparse
@@ -39,6 +44,31 @@ ACTIONS = ("installed", "reinstalled", "skipped", "failed", "checked",
            "updated", "skipped-update", "audit-run", "scan-run")
 RESULTS = ("success", "failure", "up-to-date")
 
+# Standard fields are managed explicitly; extra --field entries may not clobber
+# them (use the dedicated flags for those).
+RESERVED = ("timestamp", "skill", "action", "source", "result", "details")
+
+
+def _coerce(value):
+    """Turn a string value into int/float/bool when it clearly is one.
+
+    Lets callers pass structured data like `--field skills_scanned=19` and have
+    it stored as the JSON number 19 (not the string "19"), so readers never have
+    to parse it back out of free text.
+    """
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    low = value.strip().lower()
+    if low in ("true", "false"):
+        return low == "true"
+    return value
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -53,16 +83,31 @@ def main():
                         help="GitHub URL where applicable.")
     parser.add_argument("--details", default="",
                         help="Brief plain-English summary of what happened.")
+    parser.add_argument("--field", action="append", default=[], metavar="NAME=VALUE",
+                        help="Extra structured field to include in the entry, e.g. "
+                             "--field skills_scanned=19. Repeatable. Numeric/boolean "
+                             "values are stored as JSON numbers/booleans. Reserved "
+                             "names (%s) are ignored." % ", ".join(RESERVED))
     args = parser.parse_args()
 
+    # Standard fields first (details kept last so any extra structured fields
+    # sit between `result` and the human-readable `details`).
     entry = {
         "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
         "skill": args.skill,
         "action": args.action,
         "source": args.source,
         "result": args.result,
-        "details": args.details,
     }
+    for raw in args.field:
+        if "=" not in raw:
+            continue  # ignore malformed --field with no '='
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key or key in RESERVED:
+            continue  # never let an extra field clobber a standard one
+        entry[key] = _coerce(value)
+    entry["details"] = args.details
 
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
