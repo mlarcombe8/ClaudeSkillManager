@@ -64,6 +64,42 @@ All three consult a shared pattern catalog, [`shared/security-patterns.md`](shar
 - **Obfuscation** — base64/hex-encoded strings and other attempts to hide intent
 - **Scope expansion** — file writes outside the skill directory, scripts that run automatically (e.g. `.github/` workflows, post-clone hooks), and changes that widen a skill's permissions
 
+### Running the deep security scan
+
+`csm-skill-audit`'s scan is the *already-installed* layer. Trigger it two ways:
+
+- **`/csm-skill-audit --scan`** — run it directly (skips the prompt).
+- Accept the prompt offered at the **end of a standard `/csm-skill-audit`** run.
+
+Before reading any content, it shows a **pre-scan summary** so you know the cost up front — one row per skill with its **size** (SKILL.md + scripts), **number of script files**, and an **estimated complexity** (🟢 low / 🟡 medium / 🔴 high, derived from file count and total size), plus totals:
+
+```
+  Skill              Size       Scripts   Complexity
+  ───────────────────────────────────────────────────
+  impeccable         854.0 KB   40        🔴 high
+  ui-ux-pro-max      128.6 KB    4        🟡 medium
+  brandkit            15.6 KB    0        🟢 low
+  Total: 19 skills · 65 files · 1.3 MB
+```
+
+It then shows a usage warning:
+
+> ⚠️ Note: A full library scan reads and analyzes every skill file and may consume significant Claude usage. For large libraries consider scanning individual skills instead. You can always run a targeted scan later with /csm-skill-audit --scan and select specific skills at that time.
+
+…and offers **three choices** (not just yes/no):
+
+1. **Scan all skills**
+2. **Select specific skills to scan** — pick from the list above
+3. **Skip for now**
+
+To scan only certain skills without the picker, name them directly:
+
+```sh
+/csm-skill-audit --scan --skills impeccable,ui-ux-pro-max
+```
+
+Each scanned skill gets a **per-skill security score** and the library gets an **overall score**, with findings grouped 🔴 critical / 🟡 warning / 🔵 info. Flagged skills are handed off to `/csm-skill-update` (if an update is pending) or `/csm-skill-install` (to reinstall cleanly).
+
 **These checks are advisory.** The skills surface findings in plain English and flag anything suspicious, but they never block or modify anything on their own — **you always make the final decision** on whether to install, update, or act on a flagged skill.
 
 ## Repository layout
@@ -72,12 +108,12 @@ All three consult a shared pattern catalog, [`shared/security-patterns.md`](shar
 ClaudeSkillManager/
 ├── install.sh                # one-shot POSIX installer (clone + symlinks)
 ├── shared/
-│   └── security-patterns.md  # shared catalog for the install + update scans
+│   └── security-patterns.md  # shared catalog for the install, update & audit scans
 ├── csm-skill-install/
 │   └── SKILL.md
 ├── csm-skill-update/
 │   ├── SKILL.md
-│   └── scripts/
+│   └── scripts/              # discover.py (repo-grouped update discovery)
 ├── csm-skill-finder/
 │   ├── SKILL.md
 │   └── references/           # incl. upstream-baseline.md for drift detection
