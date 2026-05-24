@@ -124,6 +124,16 @@ def human_size(kb):
     return "%.1f TB" % size
 
 
+def human_bytes(n):
+    """Render a byte count as a human-readable string."""
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0 or unit == "GB":
+            return "%d %s" % (int(size), unit) if unit == "B" else "%.1f %s" % (size, unit)
+        size /= 1024.0
+    return "%.1f GB" % size
+
+
 def changed_line_count(a_text, b_text):
     """Count added/removed lines between two texts (a unified-diff delta)."""
     diff = difflib.unified_diff(
@@ -313,6 +323,47 @@ def _iter_scan_files(skill_dir):
                 return
 
 
+def _scan_complexity(files, total_bytes):
+    """Rough estimate of how heavy a skill is to scan/interpret."""
+    if files >= 8 or total_bytes > 150 * 1024:
+        return "high"
+    if files <= 2 and total_bytes <= 30 * 1024:
+        return "low"
+    return "medium"
+
+
+def compute_scan_preview(skill_dir):
+    """Cheap (stat-only) preview of what a security scan would read for a skill.
+
+    Used by the standard audit so the pre-scan prompt can show sizes, script
+    counts and an estimated complexity *without* reading any content yet.
+    """
+    skillmd_bytes = 0
+    scripts = 0
+    files = 0
+    total_bytes = 0
+    for ap, _rp, kind in _iter_scan_files(skill_dir):
+        try:
+            sz = os.path.getsize(ap)
+        except OSError:
+            sz = 0
+        files += 1
+        total_bytes += sz
+        if kind == "markdown" and os.path.basename(ap).lower() == "skill.md":
+            skillmd_bytes += sz
+        if kind == "script":
+            scripts += 1
+    return {
+        "files": files,
+        "scripts": scripts,
+        "skillmd_bytes": skillmd_bytes,
+        "skillmd_size": human_bytes(skillmd_bytes),
+        "total_bytes": total_bytes,
+        "total_size": human_bytes(total_bytes),
+        "complexity": _scan_complexity(files, total_bytes),
+    }
+
+
 def _scan_file(ap, rp, kind, findings):
     """Append security findings discovered in one file."""
     try:
@@ -358,13 +409,19 @@ def _scan_file(ap, rp, kind, findings):
             })
 
 
-def run_security_scan(skills, patterns_source, patterns_loaded):
-    """Scan each installed skill's content; return the security report dict."""
+def run_security_scan(skills, patterns_source, patterns_loaded, only=None):
+    """Scan each installed skill's content; return the security report dict.
+
+    `only` (optional set of install names) limits the scan to those skills, so
+    a user can scan specific skills instead of the whole library.
+    """
     sec_skills = []
     tot_c = tot_w = tot_i = files_total = flagged = 0
     for s in skills:
         if not s["link_ok"] or not s["skillmd_present"]:
             continue  # can't read content of a broken/empty skill
+        if only is not None and s["install_name"] not in only:
+            continue  # scoped scan: skip skills not requested
         findings = []
         nfiles = 0
         for ap, rp, kind in _iter_scan_files(s["real_path"]):
@@ -400,6 +457,8 @@ def run_security_scan(skills, patterns_source, patterns_loaded):
     ogr, olab = sec_grade(overall)
     return {
         "ran": True,
+        "scope": "selected" if only is not None else "all",
+        "requested": sorted(only) if only is not None else None,
         "patterns_source": patterns_source,
         "patterns_loaded": patterns_loaded,
         "overall_score": overall,
@@ -431,9 +490,10 @@ def _new_skill(name, link_path, real_path, is_symlink, link_ok, skillmd_present,
         "is_symlink": is_symlink,
         "link_ok": link_ok,
         "skillmd_present": skillmd_present,
-        # git/drift fields filled in later
+        # git/drift/preview fields filled in later
         "git": None,
         "drift": None,
+        "scan_preview": None,
         "severity": "ok",
     }
 
@@ -615,8 +675,14 @@ def main():
     parser.add_argument("--scan", action="store_true",
                         help="Also run the deep security scan (content analysis of "
                              "each skill's SKILL.md and scripts).")
+    parser.add_argument("--skills", default=None,
+                        help="Comma-separated install names to limit --scan to "
+                             "(e.g. --skills impeccable,ui-ux-pro-max). Default: all.")
     args = parser.parse_args()
     do_fetch = not args.no_fetch
+    only = None
+    if args.skills:
+        only = set(x.strip() for x in args.skills.split(",") if x.strip())
 
     errors = []
     critical = []
@@ -817,6 +883,22 @@ def main():
         handoff=None,
     ))
 
+    # --- Pre-scan preview (cheap stat-only sizing for the scan prompt) ----- #
+    # Lets the end-of-audit prompt show per-skill size / script count /
+    # estimated complexity *before* any content is read.
+    for s in skills:
+        if s["link_ok"] and s["skillmd_present"]:
+            s["scan_preview"] = compute_scan_preview(s["real_path"])
+    _previews = [s["scan_preview"] for s in skills if s.get("scan_preview")]
+    _pv_bytes = sum(p["total_bytes"] for p in _previews)
+    scan_preview = {
+        "skills": len(_previews),
+        "files": sum(p["files"] for p in _previews),
+        "scripts": sum(p["scripts"] for p in _previews),
+        "total_bytes": _pv_bytes,
+        "total_size": human_bytes(_pv_bytes),
+    }
+
     # --- Health score ------------------------------------------------------ #
     n_crit, n_warn, n_info = len(critical), len(warning), len(info)
     score = max(0, 100 - SCORE_CRITICAL * n_crit - SCORE_WARNING * n_warn - SCORE_INFO * n_info)
@@ -829,12 +911,13 @@ def main():
         sec_source = os.path.join(suite_root, "shared", "security-patterns.md")
         sec_loaded = os.path.isfile(sec_source)
     if args.scan:
-        security = run_security_scan(skills, sec_source, sec_loaded)
+        security = run_security_scan(skills, sec_source, sec_loaded, only=only)
     else:
         security = {
             "ran": False,
             "hint": "Run `audit.py --scan` (or accept the end-of-audit prompt) to "
-                    "deep-scan each skill's content against shared/security-patterns.md.",
+                    "deep-scan each skill's content against shared/security-patterns.md. "
+                    "Add --skills name1,name2 to scan only specific skills.",
         }
 
     output = {
@@ -857,6 +940,7 @@ def main():
             "note": "score = max(0, 100 - 25*critical - 8*warning); info does not reduce score",
         },
         "storage": storage,
+        "scan_preview": scan_preview,
         "skills": sorted(skills, key=lambda s: s["install_name"]),
         "findings": {
             "critical": critical,

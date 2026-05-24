@@ -136,25 +136,54 @@ End with a clear, non-pushy handoff, e.g.:
 
 If everything is clean (no critical or warning findings), congratulate the user and note the score.
 
-### STEP 5 — Always offer the deep security scan
+### STEP 5 — Pre-scan summary, then always offer the deep security scan
 
-After presenting the standard audit, **always ask** (this is mandatory — use `AskUserQuestion` or a plain question):
+After presenting the standard audit, and **before asking anything**, show a **pre-scan summary** built straight from the standard audit JSON (no extra command — the data is already there):
 
-> **"Would you like to run a deep security scan of your installed skills?"**
+- **Per skill**, from `skills[].scan_preview`: the **name**, **size** (`total_size` = SKILL.md + scripts), **# scripts** (`scripts`), and **estimated complexity** (`complexity`: low / medium / high).
+- **Totals**, from the top-level `scan_preview`: how many **skills**, how many **files**, and the **combined size** to be scanned.
 
-Make the distinction explicit so the user knows it's something new:
-- The **standard audit** you just showed checks *health* — symlinks, git connection, updates, drift, orphans.
-- The **security scan** reads the actual *contents* of every skill (its `SKILL.md` and scripts) and analyzes them against the suite's `../shared/security-patterns.md` for risky behavior.
+Render it as a table, heaviest-first so the costly skills are obvious:
 
-Skip this prompt **only** when the user already invoked `/csm-skill-audit --scan` (they opted in — run the scan as part of the same pass). If the user declines, stop here.
+```
+What a full security scan would read:
+
+  Skill                      Size       Scripts   Complexity
+  ─────────────────────────────────────────────────────────
+  impeccable                 854.0 KB   40        🔴 high
+  ui-ux-pro-max              128.6 KB   4         🟡 medium
+  csm-skill-audit             54.2 KB   1         🟡 medium
+  …
+  brandkit                    15.6 KB   0         🟢 low
+
+  Total: 19 skills · 65 files · 1.3 MB
+```
+
+Then show this **usage warning** verbatim:
+
+> ⚠️ Note: A full library scan reads and analyzes every skill file and may consume significant Claude usage. For large libraries consider scanning individual skills instead. You can always run a targeted scan later with /csm-skill-audit --scan and select specific skills at that time.
+
+Now **always ask** (mandatory — use `AskUserQuestion`) with **three options**, not yes/no:
+
+1. **Scan all skills** — run the full scan (STEP 6, no `--skills`).
+2. **Select specific skills to scan** — present the skills from the table (a multi-select via `AskUserQuestion`, or have the user name them), then run STEP 6 scoped to just those: `--skills <name1>,<name2>`. Steer large libraries here.
+3. **Skip for now** — stop; remind them they can run `/csm-skill-audit --scan` anytime.
+
+Skip this whole prompt **only** when the user already invoked `/csm-skill-audit --scan` (they opted in — go straight to STEP 6, honoring any skills they named).
 
 ### STEP 6 — Deep security scan (content analysis)
 
-Re-run the script with `--scan`. Let it fetch (don't add `--no-fetch`) so the security section's `pending_update` / `commits_behind` are accurate — the handoffs below depend on them. Use `--no-fetch` only when offline; then `pending_update` is unknown, so fall back to the standard audit's behind-count or default to a clean reinstall.
+Re-run the script with `--scan`, scoping to the user's STEP 5 choice. Let it fetch (don't add `--no-fetch`) so the security section's `pending_update` / `commits_behind` are accurate — the handoffs below depend on them. Use `--no-fetch` only when offline; then `pending_update` is unknown, so fall back to the standard audit's behind-count or default to a clean reinstall.
 
 ```bash
+# Scan all skills:
 python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py --scan
+
+# Scan only the skills the user selected:
+python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py --scan --skills <name1>,<name2>
 ```
+
+The `security` object reports `scope` (`"all"` or `"selected"`) and `requested` (the names you asked for) — present only the skills it actually scanned.
 
 This adds a top-level `security` object. **Present it under a clearly separate header** so health and security are never confused:
 
@@ -204,15 +233,19 @@ Close by reminding the user the scan is **advisory**: you've flagged what to loo
   "counts":  { "skills", "critical", "warning", "info" },
   "scoring": { "per_critical", "per_warning", "per_info", "note" },
   "storage": { "root", "total", "total_kb", "by_repo": [ { "name", "size" } ] },
+  "scan_preview": { "skills", "files", "scripts", "total_bytes", "total_size" },
   "skills":  [ { "install_name", "declared_name", "link_path", "real_path",
                  "is_symlink", "link_ok", "skillmd_present",
                  "git": { "is_repo", "repo_root", "has_remote", "remote", "branch",
                           "last_commit_date", "commits_behind", "fetch_ok", "fetch_error" },
                  "drift": { "checked", "differs", "changed_lines" } | null,
+                 "scan_preview": { "files", "scripts", "skillmd_bytes", "skillmd_size",
+                                   "total_bytes", "total_size", "complexity" } | null,
                  "severity": "ok|info|warning|critical" } ],
   "findings": { "critical": [...], "warning": [...], "info": [...] },
   "security": { "ran": false } |
-              { "ran": true, "patterns_source", "patterns_loaded",
+              { "ran": true, "scope": "all|selected", "requested": [names] | null,
+                "patterns_source", "patterns_loaded",
                 "overall_score", "overall_grade", "overall_label",
                 "counts": { "skills_scanned", "skills_flagged", "files_scanned",
                             "critical", "warning", "info" },
