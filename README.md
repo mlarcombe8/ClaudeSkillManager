@@ -2,6 +2,10 @@
 
 A suite of [Claude Code](https://claude.com/claude-code) skills for installing, updating, and auditing skills **properly** — that is, with a real git connection back to each skill's source so it can be reviewed, updated, and rolled back over time.
 
+## Why git-connected installs matter
+
+When a skill is installed by a plain file copy or download, it lives on your machine but has no link to its origin on GitHub. That means you can't check for updates, can't see what changed between versions, and can't roll back if an update breaks something. The skills in this suite install each skill as a git clone with a remote, so all of that becomes possible.
+
 ## Quick install
 
 ```sh
@@ -34,10 +38,6 @@ ls -l ~/.claude/skills | grep csm-skill
 ```
 
 Each subfolder is a self-contained skill (its own `SKILL.md`); Claude Code discovers skills under `~/.claude/skills`. Start a new Claude Code session for them to load, then try `/csm-skill-audit`.
-
-## Why "properly"?
-
-When a skill is installed by a plain file copy or download, it lives on your machine but has no link to its origin on GitHub. That means you can't check for updates, can't see what changed between versions, and can't roll back if an update breaks something. The skills in this suite install each skill as a git clone with a remote, so all of that becomes possible.
 
 ## Skills in this suite
 
