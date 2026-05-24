@@ -46,16 +46,17 @@ Each subfolder is a self-contained skill (its own `SKILL.md`); Claude Code disco
 | [`csm-skill-install`](csm-skill-install/) | Installs Claude Code skills via `git clone` with a remote. Triggers on "install skill", "add skill", "get skill", "set up X". |
 | [`csm-skill-update`](csm-skill-update/) | Scans installed skills, groups them by the git repo that backs them, fetches and diffs available updates, summarizes changes in plain English, flags security concerns, and applies only the updates you approve. |
 | [`csm-skill-finder`](csm-skill-finder/) | Discovers skills from the open ecosystem (`npx skills find`, the skills.sh leaderboard), vets candidates by install count/source/stars, and hands off installs to `/csm-skill-install`. |
-| [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
+| [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Also offers a **deep security scan** (`--scan`) that analyzes each skill's contents for risky behavior. Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
 
 ## Security
 
-Two skills in the suite review skill code for risky behavior before anything lands on your machine:
+Three of the skills review skill code for risky behavior, at different moments:
 
 - **`csm-skill-install`** runs a **static analysis** of a skill's `SKILL.md` and any scripts in its repo *before* installing — inspecting the files as they are for risky patterns.
 - **`csm-skill-update`** runs a **diff analysis** of the *incoming* changes *before* applying an update — so you see what new code an update would introduce, not just the current state.
+- **`csm-skill-audit --scan`** runs an on-demand **deep security scan** across *every already-installed* skill — reading each skill's contents and reporting a per-skill and overall **security score** with findings grouped by severity. Run it directly, or accept the prompt offered at the end of a standard audit.
 
-Both consult a shared pattern catalog, [`shared/security-patterns.md`](shared/security-patterns.md), which covers, at a high level:
+All three consult a shared pattern catalog, [`shared/security-patterns.md`](shared/security-patterns.md), which covers, at a high level:
 
 - **Shell execution** — `subprocess`, `exec`, `eval`, `os.system`, `child_process`, and similar
 - **Network activity** — `curl`/`wget`/`fetch` and requests to non-GitHub URLs
@@ -63,7 +64,7 @@ Both consult a shared pattern catalog, [`shared/security-patterns.md`](shared/se
 - **Obfuscation** — base64/hex-encoded strings and other attempts to hide intent
 - **Scope expansion** — file writes outside the skill directory, scripts that run automatically (e.g. `.github/` workflows, post-clone hooks), and changes that widen a skill's permissions
 
-**These checks are advisory.** The skills surface findings in plain English and flag anything suspicious, but they never block on their own — **you always make the final decision** on whether to install or apply an update.
+**These checks are advisory.** The skills surface findings in plain English and flag anything suspicious, but they never block or modify anything on their own — **you always make the final decision** on whether to install, update, or act on a flagged skill.
 
 ## Repository layout
 
@@ -82,5 +83,5 @@ ClaudeSkillManager/
 │   └── references/           # incl. upstream-baseline.md for drift detection
 └── csm-skill-audit/
     ├── SKILL.md
-    └── scripts/              # audit.py (read-only health scan → JSON)
+    └── scripts/              # audit.py (read-only health scan, + --scan security scan → JSON)
 ```

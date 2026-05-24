@@ -21,10 +21,18 @@ Health score
   per warning finding (info costs nothing), clamped to [0, 100], then mapped to
   a letter grade. The rubric is duplicated in SKILL.md so Claude can explain it.
 
+There are two layers, kept distinct in the JSON:
+  * STANDARD AUDIT (always) — health / git / symlinks → top-level "health",
+    "findings", "skills", "storage".
+  * DEEP SECURITY SCAN (only with --scan) — content analysis of each skill's
+    SKILL.md and scripts against shared/security-patterns.md → top-level
+    "security" (per-skill + overall security scores and findings).
+
 Usage
 -----
-  python3 audit.py            # full audit (fetches remotes to check "behind")
-  python3 audit.py --no-fetch # skip network fetches; "behind" becomes unknown
+  python3 audit.py             # standard audit (fetches remotes to check "behind")
+  python3 audit.py --no-fetch  # skip network fetches; "behind" becomes unknown
+  python3 audit.py --scan      # standard audit PLUS the deep security scan
 
 Output: pretty-printed JSON on stdout. Non-fatal problems are collected under
 the top-level "errors" array rather than crashing the run.
@@ -34,6 +42,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -140,6 +149,274 @@ def grade_for(score):
     if score >= 40:
         return "D", "Poor"
     return "F", "Critical"
+
+
+# --------------------------------------------------------------------------- #
+# Deep security scan (--scan): static content analysis of each installed skill
+# against the patterns documented in shared/security-patterns.md.
+#
+# This is mechanical pattern-matching that produces *candidate* findings with
+# enough context (file, line, snippet) for Claude to apply judgment — e.g.
+# "shell execution on UNTRUSTED input" is the truly-critical case, which Claude
+# decides from the snippet. Documentation/comment/string mentions of a code
+# pattern (a *mention* of `subprocess`, not an *invocation*) are demoted to
+# info so security tooling and docs don't trip false criticals.
+# --------------------------------------------------------------------------- #
+SEC_CRITICAL = 20
+SEC_WARNING = 8
+SEC_INFO = 1
+SEVERITY_WEIGHT = {"critical": SEC_CRITICAL, "warning": SEC_WARNING, "info": SEC_INFO}
+
+SCRIPT_EXTS = {".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs",
+               ".ts", ".tsx", ".rb", ".pl", ".php", ".ps1"}
+MANIFEST_NAMES = {"package.json", "requirements.txt", "pyproject.toml",
+                  "pipfile", "gemfile"}
+MAX_FILE_BYTES = 512 * 1024
+MAX_FILES_PER_SKILL = 200
+MAX_MATCHES_PER_CAT_PER_FILE = 8
+
+# Categories describing INSTRUCTIONS to Claude live naturally in prose, so they
+# keep their severity even in markdown. CODE-behavior categories are demoted
+# when the match is inert (comment / string literal / documentation).
+INSTRUCTION_CATS = {"permission_change", "scope_expansion"}
+
+# (category, base_severity, regex) — mirrors shared/security-patterns.md.
+_PATTERN_DEFS = [
+    # ---- Critical: high-priority code behavior ----
+    # Target actual invocations, not imports/exception names or JS `.exec()`
+    # regex-method calls (the bare `exec(`/`eval(` use a lookbehind to skip a
+    # leading dot or word char, so `foo.exec(` / `regex.exec(` don't match).
+    ("shell_execution", "critical",
+     r"subprocess\.(?:run|call|Popen|check_output|check_call|getoutput)"
+     r"|\bos\.system\s*\(|\bos\.popen\s*\(|\bos\.exec\w*\s*\(|\bpty\.spawn\b"
+     r"|shell\s*=\s*True|child_process|\bexecSync\b|\bspawnSync\b|\bexecFileSync\b"
+     r"|(?<![.\w])eval\s*\(|(?<![.\w])exec\s*\("),
+    ("destructive_command", "critical",
+     r"\brm\s+-[rf]{1,2}\b|\bsudo\b|\bmkfs\b|\bchmod\s+777\b|\bchown\s+-R\b|>\s*/dev/sd"),
+    # `(?<![\w.])\.env\b` matches a literal .env file but NOT `process.env` /
+    # `os.environ` (those are env access — caught as a warning below).
+    ("credential_harvesting", "critical",
+     r"~/\.ssh|~/\.aws|\.aws/credentials|\bid_rsa\b|\bAPI_KEY\b|\bAPIKEY\b|\bSECRET_KEY\b"
+     r"|\bACCESS_TOKEN\b|\bAUTH_TOKEN\b|\bPRIVATE_KEY\b|\bPASSWORD\b|(?<![\w.])\.env\b|\bnetrc\b"),
+    ("obfuscation", "critical",
+     r"\bbase64\b|\batob\b|\bbtoa\b|\bb64decode\b|\bb64encode\b|codecs\.decode"
+     r"|fromCharCode|(?:\\x[0-9a-fA-F]{2}){4,}"),
+    # ---- Warning: medium-priority behavior / scope ----
+    ("network", "warning",
+     r"\bcurl\b|\bwget\b|requests\.(?:get|post|put|request)|\bfetch\s*\("
+     r"|\baxios\b|urllib\.request|http\.client|new\s+WebSocket|socket\.socket"),
+    ("filesystem_scope", "warning",
+     r"~/\.claude\b|~/\.config\b|\bshutil\.(?:move|copy|copytree|rmtree)\b"
+     r"|\bos\.remove\b|\bos\.rename\b|open\([^)]*['\"]/(?:etc|usr|var|bin)/"),
+    ("env_access", "warning",
+     r"\bos\.environ\b|process\.env\b|\bgetenv\b"),
+    ("permission_change", "warning",
+     r"without asking|without confirmation|do not ask|don'?t ask|no confirmation"
+     r"|skip(?:ping)? confirmation|auto-?(?:apply|execute|run|confirm)"),
+    ("scope_expansion", "warning",
+     r"browser (?:history|cookies)|local ?storage|other skills'? files|read[^.\n]{0,40}cookies"),
+    ("external_url", "warning",
+     r"https?://(?!github\.com|raw\.githubusercontent\.com|api\.github\.com|docs\."
+     r"|registry\.npmjs\.org|pypi\.org|developer\.mozilla\.org|www\.w3\.org|schema\.org)"
+     r"[A-Za-z0-9.\-]+"),
+    # ---- Info: low-priority / informational ----
+    ("doc_or_public_api", "info",
+     r"https?://(?:github\.com|raw\.githubusercontent\.com|api\.github\.com|docs\."
+     r"|registry\.npmjs\.org|pypi\.org|developer\.mozilla\.org)"),
+]
+_PATTERNS = [(c, s, re.compile(rx, re.IGNORECASE)) for c, s, rx in _PATTERN_DEFS]
+
+_CATEGORY_NOTES = {
+    "shell_execution": "Shell/dynamic execution — confirm the input is fixed/trusted, not user- or network-controlled.",
+    "destructive_command": "Destructive command — flag regardless of context.",
+    "credential_harvesting": "Touches secrets/credentials — verify it isn't reading or exfiltrating them.",
+    "obfuscation": "Encoded/obfuscated content — decode and verify intent.",
+    "network": "Network call — verify the destination and that no local data is sent.",
+    "filesystem_scope": "Operates outside the skill directory — verify the scope.",
+    "env_access": "Reads environment variables — verify which ones and why.",
+    "permission_change": "Instruction to act without confirmation — verify it is appropriate.",
+    "scope_expansion": "Accesses browser / other-skill / project data — verify necessity.",
+    "external_url": "Non-allowlisted external URL — verify the destination.",
+    "doc_or_public_api": "Documentation link or well-known public API — informational.",
+}
+
+
+def sec_grade(score):
+    """Map a 0-100 security score to (letter, label)."""
+    if score >= 90:
+        return "A", "Clean"
+    if score >= 75:
+        return "B", "Low risk"
+    if score >= 60:
+        return "C", "Some concerns"
+    if score >= 40:
+        return "D", "Elevated risk"
+    return "F", "High risk"
+
+
+def _sev_rank(sev):
+    return {"critical": 3, "warning": 2, "info": 1}.get(sev, 0)
+
+
+def _is_suite_skill(remote):
+    return bool(remote) and "ClaudeSkillManager" in remote
+
+
+def _looks_inert(line, mstart):
+    """True if a match is documentation/comment/string-literal, not live code."""
+    stripped = line.lstrip()
+    for c in ("#", "//", "*", "<!--", "- ", "> "):
+        if stripped.startswith(c):
+            return True
+    prefix = line[:mstart]
+    for q in ("'", '"', "`"):
+        if prefix.count(q) % 2 == 1:  # the token sits inside an open quote
+            return True
+    low = line.lower()
+    for k in ("re.compile", "r'", 'r"', "regex", "pattern", "flag the",
+              "flag any", "always flag", "watch for", "concern"):
+        if k in low:
+            return True
+    return False
+
+
+def _iter_scan_files(skill_dir):
+    """Yield (abspath, relpath, kind) for SKILL.md, scripts, and manifests."""
+    seen = set()
+    count = 0
+    for root, dirs, files in os.walk(skill_dir, followlinks=True):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        rroot = os.path.realpath(root)
+        if rroot in seen:
+            dirs[:] = []
+            continue
+        seen.add(rroot)
+        for fn in sorted(files):
+            low = fn.lower()
+            if low == "skill.md":
+                kind = "markdown"
+            elif low in MANIFEST_NAMES:
+                kind = "manifest"
+            elif os.path.splitext(fn)[1].lower() in SCRIPT_EXTS:
+                kind = "script"
+            else:
+                continue
+            ap = os.path.join(root, fn)
+            try:
+                if os.path.getsize(ap) > MAX_FILE_BYTES:
+                    continue
+            except OSError:
+                continue
+            yield ap, os.path.relpath(ap, skill_dir), kind
+            count += 1
+            if count >= MAX_FILES_PER_SKILL:
+                return
+
+
+def _scan_file(ap, rp, kind, findings):
+    """Append security findings discovered in one file."""
+    try:
+        with open(ap, "r", encoding="utf-8", errors="ignore") as fh:
+            text = fh.read()
+    except OSError:
+        return
+    if kind == "manifest":
+        findings.append({
+            "category": "external_dependency", "severity": "info",
+            "base_severity": "info", "prose": False, "file": rp, "line": 1,
+            "snippet": "declares external dependencies (%s)" % os.path.basename(ap),
+            "note": "Declares third-party dependencies; review changes in diffs via /csm-skill-update.",
+        })
+        return
+    per_cat = {}
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw[:4000]
+        for cat, base_sev, rx in _PATTERNS:
+            m = rx.search(line)
+            if not m:
+                continue
+            key = (cat, rp)
+            if per_cat.get(key, 0) >= MAX_MATCHES_PER_CAT_PER_FILE:
+                continue
+            per_cat[key] = per_cat.get(key, 0) + 1
+            inert = (kind == "markdown") or _looks_inert(line, m.start())
+            if cat in INSTRUCTION_CATS:
+                eff = base_sev
+            elif inert:
+                eff = "info"
+            else:
+                eff = base_sev
+            findings.append({
+                "category": cat,
+                "severity": eff,
+                "base_severity": base_sev,
+                "prose": bool(inert),
+                "file": rp,
+                "line": lineno,
+                "snippet": line.strip()[:160],
+                "note": _CATEGORY_NOTES.get(cat, ""),
+            })
+
+
+def run_security_scan(skills, patterns_source, patterns_loaded):
+    """Scan each installed skill's content; return the security report dict."""
+    sec_skills = []
+    tot_c = tot_w = tot_i = files_total = flagged = 0
+    for s in skills:
+        if not s["link_ok"] or not s["skillmd_present"]:
+            continue  # can't read content of a broken/empty skill
+        findings = []
+        nfiles = 0
+        for ap, rp, kind in _iter_scan_files(s["real_path"]):
+            nfiles += 1
+            _scan_file(ap, rp, kind, findings)
+        c = sum(1 for f in findings if f["severity"] == "critical")
+        w = sum(1 for f in findings if f["severity"] == "warning")
+        i = sum(1 for f in findings if f["severity"] == "info")
+        deduction = sum(SEVERITY_WEIGHT[f["severity"]] for f in findings)
+        score = max(0, 100 - deduction)
+        grade, label = sec_grade(score)
+        git = s.get("git") or {}
+        behind = git.get("commits_behind")
+        sec_skills.append({
+            "install_name": s["install_name"],
+            "score": score, "grade": grade, "label": label,
+            "files_scanned": nfiles,
+            "counts": {"critical": c, "warning": w, "info": i},
+            "commits_behind": behind,
+            "pending_update": isinstance(behind, int) and behind > 0,
+            "is_suite_skill": _is_suite_skill(git.get("remote")),
+            "findings": sorted(findings, key=lambda f: (_sev_rank(f["severity"]),
+                                                        not f["prose"]), reverse=True),
+        })
+        tot_c += c
+        tot_w += w
+        tot_i += i
+        files_total += nfiles
+        if c or w:
+            flagged += 1
+    scanned = len(sec_skills)
+    overall = round(sum(x["score"] for x in sec_skills) / scanned) if scanned else 100
+    ogr, olab = sec_grade(overall)
+    return {
+        "ran": True,
+        "patterns_source": patterns_source,
+        "patterns_loaded": patterns_loaded,
+        "overall_score": overall,
+        "overall_grade": ogr,
+        "overall_label": olab,
+        "counts": {"skills_scanned": scanned, "skills_flagged": flagged,
+                   "files_scanned": files_total,
+                   "critical": tot_c, "warning": tot_w, "info": tot_i},
+        "scoring": {
+            "per_critical": -SEC_CRITICAL, "per_warning": -SEC_WARNING, "per_info": -SEC_INFO,
+            "note": "per-skill = max(0, 100 - 20*critical - 8*warning - 1*info); overall = "
+                    "mean of per-skill scores. Doc/comment/string mentions of code patterns "
+                    "are demoted to info (prose=true), so a *mention* of a pattern isn't a "
+                    "critical. Claude still confirms genuine risk from each snippet.",
+        },
+        "skills": sorted(sec_skills, key=lambda x: x["score"]),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -335,6 +612,9 @@ def main():
     parser = argparse.ArgumentParser(description="Audit installed Claude Code skills (read-only).")
     parser.add_argument("--no-fetch", action="store_true",
                         help="Skip network fetches; 'behind on updates' becomes unknown.")
+    parser.add_argument("--scan", action="store_true",
+                        help="Also run the deep security scan (content analysis of "
+                             "each skill's SKILL.md and scripts).")
     args = parser.parse_args()
     do_fetch = not args.no_fetch
 
@@ -542,6 +822,21 @@ def main():
     score = max(0, 100 - SCORE_CRITICAL * n_crit - SCORE_WARNING * n_warn - SCORE_INFO * n_info)
     letter, label = grade_for(score)
 
+    # --- Deep security scan (content analysis) — only with --scan ---------- #
+    sec_source = None
+    sec_loaded = False
+    if suite_root:
+        sec_source = os.path.join(suite_root, "shared", "security-patterns.md")
+        sec_loaded = os.path.isfile(sec_source)
+    if args.scan:
+        security = run_security_scan(skills, sec_source, sec_loaded)
+    else:
+        security = {
+            "ran": False,
+            "hint": "Run `audit.py --scan` (or accept the end-of-audit prompt) to "
+                    "deep-scan each skill's content against shared/security-patterns.md.",
+        }
+
     output = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -568,6 +863,7 @@ def main():
             "warning": warning,
             "info": info,
         },
+        "security": security,
         "errors": errors,
     }
     print(json.dumps(output, indent=2))

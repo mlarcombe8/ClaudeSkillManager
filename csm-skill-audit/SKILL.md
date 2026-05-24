@@ -1,6 +1,6 @@
 ---
 name: csm-skill-audit
-description: Audit the health of your installed Claude Code skills. Use this skill when the user wants to check their skill library's health, run a skill audit, find broken or misconfigured skills, check for drift from upstream, see a skill health score, or clean up orphaned skill files. Trigger on phrases like "audit my skills", "skill health check", "are my skills healthy", "check my skill library", "what's wrong with my skills", or "skill audit".
+description: Audit the health of your installed Claude Code skills and optionally run a deep security scan of their contents. Use this skill when the user wants to check their skill library's health, run a skill audit, find broken or misconfigured skills, check for drift from upstream, see a skill health score, clean up orphaned skill files, or security-scan their skills for risky behavior (shell execution, credential harvesting, obfuscation, scope/permission changes). Trigger on phrases like "audit my skills", "skill health check", "are my skills healthy", "check my skill library", "what's wrong with my skills", "skill audit", "security scan my skills", "are my skills safe", or running "/csm-skill-audit --scan".
 ---
 
 # Skill Audit
@@ -15,7 +15,7 @@ ClaudeSkillManager is a suite of skills designed to help you manage your Claude 
 - **csm-skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
 - **csm-skill-update** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
 - **csm-skill-finder** — Discovers skills from the open ecosystem and hands off to `/csm-skill-install`
-- **csm-skill-audit** *(this skill)* — Audits your entire skill library for health, correctness, and updatability
+- **csm-skill-audit** *(this skill)* — Audits your entire skill library for health and updatability, plus an optional **deep security scan** that statically analyzes each skill's contents
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
@@ -28,13 +28,26 @@ This skill uses a **hybrid approach**:
 1. A Python script (`scripts/audit.py`) gathers all the data — it scans `~/.claude/skills` and `~/.agents/skills`, resolves symlinks, checks git status, detects drift and orphans, and emits a single JSON document. **The script is strictly read-only.**
 2. **You (Claude)** interpret that JSON and present it: a health summary first, then findings grouped by severity, then handoffs.
 
-The output is a **health score (0–100)** plus findings in three buckets:
+The skill has **two distinct layers — keep them separate when you report:**
 
-| Severity | What it covers |
+1. **Standard audit** (always runs) — *health*: symlinks, missing `SKILL.md`, git remote, behind-on-updates, drift, orphans, storage. Produces the **health score**.
+2. **Deep security scan** (opt-in, `--scan`) — *content analysis*: reads each skill's `SKILL.md` and scripts and matches them against `../shared/security-patterns.md`. Produces per-skill and overall **security scores**. This is the suite's pattern catalog, the same one `csm-skill-install` and `csm-skill-update` use.
+
+The **standard audit** health score (0–100) draws on three buckets:
+
+| Severity | What it covers (health) |
 | --- | --- |
 | 🔴 **critical** | Broken symlinks; a linked skill missing its `SKILL.md` |
 | 🟡 **warning** | No git remote; behind on updates; drift vs `upstream-baseline.md`; installed without git (`npx skills add` / manual copy) |
 | 🔵 **info** | Orphaned files/directories; storage footprint; suite version |
+
+The **deep security scan** reuses the same three levels, applied to *behavior in the skill's content*:
+
+| Severity | Security patterns (high level) |
+| --- | --- |
+| 🔴 **critical** | Shell execution on untrusted input; credential/secret harvesting; obfuscation (base64/hex/`eval`) |
+| 🟡 **warning** | New external dependencies; scope expansion (browser / other-skill / project data); permission changes (acting without confirmation); network calls; writes outside the skill dir |
+| 🔵 **info** | External documentation links; well-known public APIs; and *documentation/comment* mentions of code patterns (flagged `prose: true` — not live behavior) |
 
 ---
 
@@ -45,10 +58,15 @@ The output is a **health score (0–100)** plus findings in three buckets:
 - For info-level cleanup (orphaned files/dirs), you may *describe* what could be removed, but **do not delete anything** — the user removes it themselves if they choose.
 - The script never hides errors (`2>/dev/null`) and is read-only; if it reports problems in its `errors` array, surface them rather than guessing.
 - Don't assume bash 4+ or a specific shell; the script is plain Python 3 and stdlib-only, so just run it with `python3`.
+- **The deep security scan is also read-only and advisory.** It only *reads* file contents to analyze them; it never modifies, quarantines, or removes anything. Its findings are signals for the user to weigh — they always make the final call.
 
 ---
 
 ## Workflow
+
+**Invocation modes:**
+- **`/csm-skill-audit`** (default) — run the standard audit (STEP 1–4), then **always** offer the deep security scan (STEP 5). Only run the scan (STEP 6) if the user accepts.
+- **`/csm-skill-audit --scan`** — the user explicitly wants the security scan. Run `audit.py --scan` once, present the standard audit **and** the security scan, and **skip** the STEP 5 prompt (they already opted in).
 
 ### STEP 1 — Run the audit script
 
@@ -118,6 +136,60 @@ End with a clear, non-pushy handoff, e.g.:
 
 If everything is clean (no critical or warning findings), congratulate the user and note the score.
 
+### STEP 5 — Always offer the deep security scan
+
+After presenting the standard audit, **always ask** (this is mandatory — use `AskUserQuestion` or a plain question):
+
+> **"Would you like to run a deep security scan of your installed skills?"**
+
+Make the distinction explicit so the user knows it's something new:
+- The **standard audit** you just showed checks *health* — symlinks, git connection, updates, drift, orphans.
+- The **security scan** reads the actual *contents* of every skill (its `SKILL.md` and scripts) and analyzes them against the suite's `../shared/security-patterns.md` for risky behavior.
+
+Skip this prompt **only** when the user already invoked `/csm-skill-audit --scan` (they opted in — run the scan as part of the same pass). If the user declines, stop here.
+
+### STEP 6 — Deep security scan (content analysis)
+
+Re-run the script with `--scan`. Let it fetch (don't add `--no-fetch`) so the security section's `pending_update` / `commits_behind` are accurate — the handoffs below depend on them. Use `--no-fetch` only when offline; then `pending_update` is unknown, so fall back to the standard audit's behind-count or default to a clean reinstall.
+
+```bash
+python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py --scan
+```
+
+This adds a top-level `security` object. **Present it under a clearly separate header** so health and security are never confused:
+
+```
+════════════════════════════════════════
+🔐 SECURITY SCAN (content analysis)
+════════════════════════════════════════
+   Library security: 84/100 (B — Low risk)
+   19 skills scanned · 7 flagged · 65 files · 🔴 14  🟡 44  🔵 96
+```
+
+Then, **per skill** (worst first — `security.skills` is already sorted), show its score and findings:
+
+```
+🔴 impeccable — 0/100 (High risk)   [11 critical · 34 warning · 35 info]
+   • shell_execution  scripts/live.mjs:209   execSync(cmd, …)
+   • obfuscation      scripts/live-browser.js:2614   return btoa(binary)
+🟡 ui-ux-pro-max — 88/100 (Low risk)   [0 critical · 1 warning · 4 info]
+🟢 brandkit — 100/100 (Clean)
+```
+
+**Apply judgment — the script gives *candidate* matches, not verdicts:**
+- A finding's `severity` is the effective level; **`prose: true`** means the match is a *documentation / comment / string* mention, not executing code — say so and treat it as low signal.
+- For `shell_execution` / `network` / `destructive_command`, read the `snippet` and decide whether the input is **fixed/trusted** (e.g. a hard-coded `git` command → low concern) or **untrusted/dynamic** (user- or network-controlled → genuinely critical). The cases that matter most are shell execution *on untrusted input*, real credential harvesting, and obfuscation that hides intent.
+- **`is_suite_skill: true`** marks the user's own ClaudeSkillManager skills; security tooling in general legitimately matches security vocabulary (e.g. `csm-skill-audit`'s own `subprocess` call). Contextualize these instead of alarming.
+- Scoring (`security.scoring`): per-skill = `100 − 20·critical − 8·warning − 1·info` (clamped 0–100); overall = mean of per-skill scores.
+
+#### Security handoffs
+
+For each **flagged** skill (any critical/warning), offer a path — **never act yourself**:
+- If it has a **pending update** (`pending_update: true` / `commits_behind > 0`) → hand off to **`/csm-skill-update`** to review the incoming diff and update.
+- Otherwise → hand off to **`/csm-skill-install`** to **reinstall it cleanly** from source. (For non-git skills, only this applies — there's nothing to update.)
+
+Close by reminding the user the scan is **advisory**: you've flagged what to look at, but **they decide** whether to act, and you will not modify anything.
+
 ---
 
 ## JSON shape (reference)
@@ -139,11 +211,22 @@ If everything is clean (no critical or warning findings), congratulate the user 
                  "drift": { "checked", "differs", "changed_lines" } | null,
                  "severity": "ok|info|warning|critical" } ],
   "findings": { "critical": [...], "warning": [...], "info": [...] },
+  "security": { "ran": false } |
+              { "ran": true, "patterns_source", "patterns_loaded",
+                "overall_score", "overall_grade", "overall_label",
+                "counts": { "skills_scanned", "skills_flagged", "files_scanned",
+                            "critical", "warning", "info" },
+                "scoring": { "per_critical", "per_warning", "per_info", "note" },
+                "skills": [ { "install_name", "score", "grade", "label",
+                              "files_scanned", "counts", "commits_behind",
+                              "pending_update", "is_suite_skill",
+                              "findings": [ { "category", "severity", "base_severity",
+                                             "prose", "file", "line", "snippet", "note" } ] } ] },
   "errors":   [ ... ]
 }
 ```
 
-Each finding is `{ "id", "title", "detail", "skills": [names], "handoff": "/csm-skill-install" | "/csm-skill-update" | null }`.
+Each standard finding is `{ "id", "title", "detail", "skills": [names], "handoff": "/csm-skill-install" | "/csm-skill-update" | null }`. `security` is `{ "ran": false }` unless the script was run with `--scan`.
 
 ---
 
@@ -154,9 +237,12 @@ Each finding is `{ "id", "title", "detail", "skills": [names], "handoff": "/csm-
 - **Directly-installed skills** (a real folder with a `SKILL.md`, not a symlink) — counted as skills; if not git-backed they surface under `no_git`.
 - **Non-skill content in `~/.claude/skills`** — loose files and `SKILL.md`-less directories are reported as orphaned info, never as critical "missing SKILL.md".
 - **No skills installed** — the script still returns valid JSON with an empty `skills` list; report that nothing is installed.
+- **The scan flags the suite's own tooling** — `csm-skill-audit` genuinely calls `subprocess`, and `csm-skill-install` / `csm-skill-update` *document* the patterns, so they match by design. Lean on `is_suite_skill` and `prose` to contextualize rather than alarm; a *documented* pattern (`prose: true`) is not executing code.
+- **Binary/data files** — the scan only reads `SKILL.md`, recognized script types, and dependency manifests; it caps file size and skips data files (CSV, images, etc.). Symlinked script directories are followed once (cycle-guarded).
 
 ---
 
 ## Reference Files
 
-- `scripts/audit.py` — Read-only data-gathering script; scans skills and emits the health JSON described above.
+- `scripts/audit.py` — Read-only data-gathering script. Default run emits the health JSON; `--scan` adds the `security` content-analysis section.
+- `../shared/security-patterns.md` — The suite's shared catalog of risky patterns (shared with `csm-skill-install` and `csm-skill-update`). The scan's categories mirror it.
