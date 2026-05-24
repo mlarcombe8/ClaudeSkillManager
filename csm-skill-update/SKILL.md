@@ -121,7 +121,7 @@ For each repo with a pending update, read the full diff and produce:
 - Requests for credentials, tokens, or environment variables
 - Changes that expand the skill's permissions or scope significantly
 
-Read reference file `references/security-patterns.md` for patterns to watch for.
+Read reference file `../shared/security-patterns.md` for patterns to watch for.
 
 ### STEP 4 — Present to User
 
@@ -169,5 +169,5 @@ After applying updates, remind the user to start a new Claude Code session for t
 
 ## Reference Files
 
-- `references/security-patterns.md` — Patterns to flag during security review
+- `../shared/security-patterns.md` — Patterns to flag during security review
 - `scripts/discover.py` — Skill discovery and update check script (repo-grouped, multi-skill aware)

@@ -48,22 +48,39 @@ Each subfolder is a self-contained skill (its own `SKILL.md`); Claude Code disco
 | [`csm-skill-finder`](csm-skill-finder/) | Discovers skills from the open ecosystem (`npx skills find`, the skills.sh leaderboard), vets candidates by install count/source/stars, and hands off installs to `/csm-skill-install`. |
 | [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
 
+## Security
+
+Two skills in the suite review skill code for risky behavior before anything lands on your machine:
+
+- **`csm-skill-install`** runs a **static analysis** of a skill's `SKILL.md` and any scripts in its repo *before* installing — inspecting the files as they are for risky patterns.
+- **`csm-skill-update`** runs a **diff analysis** of the *incoming* changes *before* applying an update — so you see what new code an update would introduce, not just the current state.
+
+Both consult a shared pattern catalog, [`shared/security-patterns.md`](shared/security-patterns.md), which covers, at a high level:
+
+- **Shell execution** — `subprocess`, `exec`, `eval`, `os.system`, `child_process`, and similar
+- **Network activity** — `curl`/`wget`/`fetch` and requests to non-GitHub URLs
+- **Credential harvesting** — references to `API_KEY`, `TOKEN`, `~/.ssh`, `~/.aws`, and the like
+- **Obfuscation** — base64/hex-encoded strings and other attempts to hide intent
+- **Scope expansion** — file writes outside the skill directory, scripts that run automatically (e.g. `.github/` workflows, post-clone hooks), and changes that widen a skill's permissions
+
+**These checks are advisory.** The skills surface findings in plain English and flag anything suspicious, but they never block on their own — **you always make the final decision** on whether to install or apply an update.
+
 ## Repository layout
 
 ```
 ClaudeSkillManager/
 ├── install.sh                # one-shot POSIX installer (clone + symlinks)
+├── shared/
+│   └── security-patterns.md  # shared catalog for the install + update scans
 ├── csm-skill-install/
-│   ├── SKILL.md
-│   └── references/
+│   └── SKILL.md
 ├── csm-skill-update/
 │   ├── SKILL.md
-│   ├── references/
 │   └── scripts/
 ├── csm-skill-finder/
 │   ├── SKILL.md
-│   └── references/        # incl. upstream-baseline.md for drift detection
+│   └── references/           # incl. upstream-baseline.md for drift detection
 └── csm-skill-audit/
     ├── SKILL.md
-    └── scripts/           # audit.py (read-only health scan → JSON)
+    └── scripts/              # audit.py (read-only health scan → JSON)
 ```

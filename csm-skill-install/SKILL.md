@@ -240,7 +240,7 @@ Before installing, read each selected SKILL.md and any scripts in the repo and p
 - Obfuscated or encoded strings (base64/hex)
 - New scripts that run automatically without user confirmation (e.g. CI workflows in `.github/`, post-clone hooks)
 
-Read `references/security-patterns.md` for full patterns to check.
+Read `../shared/security-patterns.md` for full patterns to check.
 
 Present findings to the user:
 - ✅ No security concerns found → proceed
@@ -325,4 +325,4 @@ Then tell the user:
 
 ## Reference Files
 
-- `references/security-patterns.md` — Security patterns to check during install scan
+- `../shared/security-patterns.md` — Security patterns to check during install scan
