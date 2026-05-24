@@ -153,6 +153,13 @@ root=$(git -C "$real" rev-parse --show-toplevel 2>/dev/null)
 If a remote exists → tell the user:
 > "This skill is already installed and set up correctly with a git connection to GitHub. No reinstall needed."
 
+Then **log the skip** (best-effort):
+```bash
+python3 ~/.claude/skills/csm-skill-install/../shared/csm_log.py \
+  --skill <install_name> --action skipped --source <github_url> --result success \
+  --details "Already installed correctly (git remote present); no reinstall needed"
+```
+
 If the repo is a multi-skill repo, note that the same clone manages its sibling skills too. Offer to update it via csm-skill-update instead.
 
 ---
@@ -306,6 +313,28 @@ Confirm: each symlink resolves, each `name:` matches its install name, any repla
 Then tell the user:
 > "Installation complete. Start a new Claude Code session to use the skill(s). You can run /csm-skill-update at any time to check for updates."
 
+## STEP 7 — Log the outcome
+
+Record what happened (best-effort — logging must never block or fail the install). Use the shared logger, one entry **per skill** you installed/relinked (so a multi-skill bundle logs one line per member):
+
+```bash
+python3 ~/.claude/skills/csm-skill-install/../shared/csm_log.py \
+  --skill <install_name> --action <installed|reinstalled> \
+  --source <github_url> --result success \
+  --details "<one-line summary, e.g. 'Installed from <repo>; linked into ~/.claude/skills'>"
+```
+
+- Use **`installed`** for a fresh install (Decision Tree **C**).
+- Use **`reinstalled`** when you reinstalled an existing or improperly-installed skill (Decision Tree **B1**).
+
+**On failure** — if a clone, backup, link, or verification step fails (see STEP 5 and the Edge Cases), log it instead and report the error to the user:
+
+```bash
+python3 ~/.claude/skills/csm-skill-install/../shared/csm_log.py \
+  --skill <install_name> --action failed --source <github_url> --result failure \
+  --details "<what failed, e.g. 'git clone failed: network error'>"
+```
+
 ---
 
 ## Edge Cases
@@ -326,3 +355,4 @@ Then tell the user:
 ## Reference Files
 
 - `../shared/security-patterns.md` — Security patterns to check during install scan
+- `../shared/csm_log.py` — Shared activity logger; called in STEP 7 (and the skip/fail paths) to record `installed` / `reinstalled` / `skipped` / `failed` entries to `~/.csm/csm.log`

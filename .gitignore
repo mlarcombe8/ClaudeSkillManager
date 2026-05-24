@@ -1,0 +1,9 @@
+# ClaudeSkillManager activity logs live in ~/.csm/ (outside this repo).
+# These rules guard against a log ever being created/committed inside the repo.
+.csm/
+csm.log
+*.log
+
+# Python bytecode cache (from running the suite's scripts)
+__pycache__/
+*.pyc

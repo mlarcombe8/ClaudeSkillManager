@@ -77,9 +77,22 @@ python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
 - This fetches each git-backed repo to check whether it's behind. If the user is offline or wants a fast local-only pass, add `--no-fetch` (then "behind on updates" is reported as *unknown* rather than a number).
 - The script prints JSON to stdout. Parse it; do not show the raw JSON to the user unless they ask.
 
-### STEP 2 — Present the health summary FIRST
+### STEP 2 — Show Suite Activity, then the health summary
 
-Lead with the score and a one-line verdict, then the counts. Example:
+**First**, render a short **Suite Activity** header from the JSON's `activity` object (which `audit.py` reads from `~/.csm/csm.log`). If `activity.log_exists` is `false` **or** all three entries are `null`, show a single line — **"No activity logged yet."** Otherwise show the lines you have (omit any that are `null`):
+
+```
+📋 Suite Activity
+   Last install:        impeccable on 2026-05-24
+   Last update check:   2026-05-23
+   Last security scan:  2026-05-22 (19 skills scanned)
+```
+
+- **Last install** → `activity.last_install.skill` + `date`.
+- **Last update check** → `activity.last_update_check.date`.
+- **Last security scan** → `activity.last_security_scan.date`, plus `(N skills scanned)` from `skills_scanned` (drop the parenthetical if it's `null`).
+
+**Then** lead with the health score and a one-line verdict, then the counts. Example:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -135,6 +148,14 @@ End with a clear, non-pushy handoff, e.g.:
 > To fix the items above: run **/csm-skill-install** to reconnect the 2 npx-installed skills, and **/csm-skill-update** to apply the pending update to `impeccable`. I won't make any changes from here — these are yours to run when ready.
 
 If everything is clean (no critical or warning findings), congratulate the user and note the score.
+
+**Then log the audit run** (best-effort — never block on logging):
+
+```bash
+python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
+  --skill all --action audit-run --result success \
+  --details "Standard audit; health <score>/100 (<grade>); <C> critical / <W> warning / <I> info"
+```
 
 ### STEP 5 — Pre-scan summary, then always offer the deep security scan
 
@@ -219,6 +240,14 @@ For each **flagged** skill (any critical/warning), offer a path — **never act 
 
 Close by reminding the user the scan is **advisory**: you've flagged what to look at, but **they decide** whether to act, and you will not modify anything.
 
+**Then log the scan** (best-effort). Keep the details phrased as "… of N skills …" so the count is machine-readable for the Suite Activity header:
+
+```bash
+python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
+  --skill all --action scan-run --result success \
+  --details "Security scan of <N> skills; overall <score>/100 (<grade>); scope <all|selected>"
+```
+
 ---
 
 ## JSON shape (reference)
@@ -234,6 +263,10 @@ Close by reminding the user the scan is **advisory**: you've flagged what to loo
   "scoring": { "per_critical", "per_warning", "per_info", "note" },
   "storage": { "root", "total", "total_kb", "by_repo": [ { "name", "size" } ] },
   "scan_preview": { "skills", "files", "scripts", "total_bytes", "total_size" },
+  "activity": { "log_path", "log_exists", "entries",
+                "last_install": { "skill", "date", "action" } | null,
+                "last_update_check": { "date" } | null,
+                "last_security_scan": { "date", "skills_scanned" } | null },
   "skills":  [ { "install_name", "declared_name", "link_path", "real_path",
                  "is_symlink", "link_ok", "skillmd_present",
                  "git": { "is_repo", "repo_root", "has_remote", "remote", "branch",
@@ -277,5 +310,6 @@ Each standard finding is `{ "id", "title", "detail", "skills": [names], "handoff
 
 ## Reference Files
 
-- `scripts/audit.py` — Read-only data-gathering script. Default run emits the health JSON; `--scan` adds the `security` content-analysis section.
+- `scripts/audit.py` — Read-only data-gathering script. Default run emits the health JSON (incl. the `activity` summary read from `~/.csm/csm.log`); `--scan` adds the `security` content-analysis section.
 - `../shared/security-patterns.md` — The suite's shared catalog of risky patterns (shared with `csm-skill-install` and `csm-skill-update`). The scan's categories mirror it.
+- `../shared/csm_log.py` — Shared activity logger. This skill calls it to record `audit-run` / `scan-run` entries, and `audit.py` reads the log to build the Suite Activity header.

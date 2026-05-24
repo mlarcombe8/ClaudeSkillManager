@@ -102,13 +102,31 @@ Each scanned skill gets a **per-skill security score** and the library gets an *
 
 **These checks are advisory.** The skills surface findings in plain English and flag anything suspicious, but they never block or modify anything on their own — **you always make the final decision** on whether to install, update, or act on a flagged skill.
 
+## Activity log
+
+Every install, update, and audit/scan appends a line to a local **activity log**, so you — and `csm-skill-audit` — can see what the suite has done over time.
+
+- **Location:** `~/.csm/csm.log` (the `~/.csm/` directory is created automatically on first write).
+- **Format:** [JSON Lines](https://jsonlines.org/) — one JSON object per line, both human-readable and easy to parse (e.g. `cat ~/.csm/csm.log | jq`).
+- **Each entry has:** `timestamp` (ISO 8601), `skill` (install name or `all`), `action` (`installed` / `reinstalled` / `skipped` / `failed` / `checked` / `updated` / `skipped-update` / `audit-run` / `scan-run`), `source` (GitHub URL where relevant), `result` (`success` / `failure` / `up-to-date`), and `details` (a short plain-English summary).
+
+Example line:
+
+```json
+{"timestamp": "2026-05-24T10:30:00-04:00", "skill": "impeccable", "action": "updated", "source": "https://github.com/owner/impeccable", "result": "success", "details": "Pulled 3 commit(s) to a1b2c3d; refreshed: impeccable"}
+```
+
+`csm-skill-audit` reads this log and prints a short **Suite Activity** summary — last install, last update check, last security scan — at the top of every audit (or "No activity logged yet" when the log is empty). The log is written by the shared `shared/csm_log.py` helper and lives **outside the repo** in your home directory; the repo's `.gitignore` also excludes `~/.csm`-style paths so a log can never be committed by accident.
+
 ## Repository layout
 
 ```
 ClaudeSkillManager/
+├── .gitignore                # ignores ~/.csm logs (and pycache) if they appear in-repo
 ├── install.sh                # one-shot POSIX installer (clone + symlinks)
 ├── shared/
-│   └── security-patterns.md  # shared catalog for the install, update & audit scans
+│   ├── security-patterns.md  # shared catalog for the install, update & audit scans
+│   └── csm_log.py            # shared JSON-lines activity logger (writes ~/.csm/csm.log)
 ├── csm-skill-install/
 │   └── SKILL.md
 ├── csm-skill-update/

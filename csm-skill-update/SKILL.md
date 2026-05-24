@@ -65,6 +65,16 @@ Present a clean summary to the user, **grouped by repo**:
 
 If no repo has updates available, tell the user everything is up to date and stop (after handling any single-skill-target confirmation below, if relevant).
 
+**Log the check** (best-effort — never block on logging), recording how many skills had updates:
+
+```bash
+python3 ~/.claude/skills/csm-skill-update/../shared/csm_log.py \
+  --skill all --action checked --result <up-to-date|success> \
+  --details "Checked <N> skills across <R> repos; <M> had updates"
+```
+
+Use result `up-to-date` when nothing was behind, otherwise `success`.
+
 ### STEP 1b — Targeting a single skill in a multi-skill repo (MANDATORY ASK)
 
 If the user asked to update **one specific skill** (e.g. `/csm-skill-update brandkit`):
@@ -151,6 +161,24 @@ git -C <repo_path> pull --ff-only
 - If `--ff-only` fails (diverged history / local changes), do NOT force — report it and point the user to the merge-conflict / customized-files edge cases below.
 - Report success or failure for each repo.
 
+**Log each applied update** (best-effort), one entry per repo, including the commits pulled and the member skills it refreshed:
+
+```bash
+python3 ~/.claude/skills/csm-skill-update/../shared/csm_log.py \
+  --skill <install_name|repo_name> --action updated --source <remote_url> --result success \
+  --details "Pulled <N> commit(s) to <short-sha>; refreshed: <skill list>"
+```
+
+If a pull fails (non-fast-forward / conflict), log the same `updated` action with `--result failure` and the reason instead.
+
+**If the user skips an available update** (e.g. "skip all", or declines a specific repo that had updates), log that too:
+
+```bash
+python3 ~/.claude/skills/csm-skill-update/../shared/csm_log.py \
+  --skill <install_name|repo_name|all> --action skipped-update --source <remote_url> --result success \
+  --details "User chose not to apply available update(s) for <skill/repo>"
+```
+
 After applying updates, remind the user to start a new Claude Code session for the changes to take effect.
 
 ---
@@ -171,3 +199,4 @@ After applying updates, remind the user to start a new Claude Code session for t
 
 - `../shared/security-patterns.md` — Patterns to flag during security review
 - `scripts/discover.py` — Skill discovery and update check script (repo-grouped, multi-skill aware)
+- `../shared/csm_log.py` — Shared activity logger; called to record `checked` / `updated` / `skipped-update` entries to `~/.csm/csm.log`

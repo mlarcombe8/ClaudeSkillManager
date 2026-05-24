@@ -161,6 +161,56 @@ def grade_for(score):
     return "F", "Critical"
 
 
+def read_activity():
+    """Read ~/.csm/csm.log (JSON Lines) and summarize recent suite activity.
+
+    Read-only. Returns the most-recent install, update check, and security scan
+    so the audit can show a "Suite Activity" header. Entries are appended in
+    chronological order, so iterating and overwriting keeps the latest of each.
+    """
+    log_file = Path.home() / ".csm" / "csm.log"
+    info = {
+        "log_path": str(log_file),
+        "log_exists": log_file.is_file(),
+        "entries": 0,
+        "last_install": None,
+        "last_update_check": None,
+        "last_security_scan": None,
+    }
+    if not info["log_exists"]:
+        return info
+    try:
+        lines = log_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return info
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue  # skip malformed lines, keep going
+        info["entries"] += 1
+        action = e.get("action", "")
+        ts = e.get("timestamp", "") or ""
+        date = ts[:10]
+        if action in ("installed", "reinstalled"):
+            info["last_install"] = {"skill": e.get("skill"), "date": date,
+                                    "action": action, "timestamp": ts}
+        elif action == "checked":
+            info["last_update_check"] = {"date": date, "timestamp": ts,
+                                         "details": e.get("details", "")}
+        elif action == "scan-run":
+            m = re.search(r"(\d+)\s+skill", e.get("details", "") or "")
+            info["last_security_scan"] = {
+                "date": date, "timestamp": ts,
+                "skills_scanned": int(m.group(1)) if m else None,
+                "details": e.get("details", ""),
+            }
+    return info
+
+
 # --------------------------------------------------------------------------- #
 # Deep security scan (--scan): static content analysis of each installed skill
 # against the patterns documented in shared/security-patterns.md.
@@ -941,6 +991,7 @@ def main():
         },
         "storage": storage,
         "scan_preview": scan_preview,
+        "activity": read_activity(),
         "skills": sorted(skills, key=lambda s: s["install_name"]),
         "findings": {
             "critical": critical,
