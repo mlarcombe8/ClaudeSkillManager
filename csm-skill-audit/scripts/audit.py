@@ -631,21 +631,101 @@ def discover_active_skills(errors):
     return skills, orphaned_files, orphaned_dirs
 
 
-def find_orphaned_clones(skills, errors):
-    """Clone dirs under ~/.agents/skills that no active skill links into."""
-    orphans = []
-    if not AGENTS_SKILLS.exists():
-        return orphans
-    referenced = [s["real_path"] for s in skills if s["link_ok"]]
-    for child in sorted(AGENTS_SKILLS.iterdir()):
-        if not child.is_dir():
+_CLONE_SHAPE_PRUNE = {".git", "node_modules", "__pycache__", ".venv",
+                      "dist", "build", ".next", ".cache"}
+
+
+def _is_clone_shaped(path):
+    """Cheap check: does this dir look like a *skill clone*?
+
+    A skill clone has a `.git` entry AND a `SKILL.md` in one of the known
+    skill-repo layouts: root, a direct child folder (e.g. ClaudeSkillManager's
+    `csm-skill-*/SKILL.md`), `skills/<name>/SKILL.md`, or
+    `.claude/skills/<name>/SKILL.md`. This deliberately ignores `SKILL.md`
+    nested arbitrarily deep — that's how a foreign project that happens to
+    *contain* a skill bundle (rather than *be* one) gets correctly filtered
+    out.
+    """
+    if not (path / ".git").exists():
+        return False
+    if (path / "SKILL.md").is_file():
+        return True
+    # Direct child subfolders (single-folder-per-skill repos, e.g. csm-*).
+    try:
+        for child in path.iterdir():
+            if not child.is_dir() or child.name in _CLONE_SHAPE_PRUNE:
+                continue
+            if (child / "SKILL.md").is_file():
+                return True
+    except OSError:
+        pass
+    # Conventional nested layouts.
+    for nested in (path / "skills", path / ".claude" / "skills"):
+        if not nested.is_dir():
             continue
-        base = str(child.resolve())
-        used = any(rp == base or rp.startswith(base + os.sep) for rp in referenced)
-        if not used:
+        try:
+            for sub in nested.iterdir():
+                if sub.is_dir() and (sub / "SKILL.md").is_file():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def find_orphaned_clones(skills, extra_scan_roots, errors):
+    """Skill clones anywhere we know to look that no active skill links into.
+
+    Scan roots are the union of:
+      * `~/.agents/skills/` (the suite's install convention; always included).
+      * Any `--scan-roots` paths the user passed.
+      * The *parent* of every repo root that backs an active skill — so if you
+        keep a clone under a projects directory (e.g. `~/ClaudeProjects/...`),
+        sibling clones there are scanned too without configuration.
+
+    Only entries that look like a skill clone (`.git` + a nested `SKILL.md`)
+    are considered; ordinary project directories that happen to share a parent
+    are filtered out so they never become false-positive orphans.
+    """
+    orphans = []
+    referenced = [s["real_path"] for s in skills if s["link_ok"]]
+
+    roots = set()
+    roots.add(AGENTS_SKILLS)
+    for raw in extra_scan_roots or ():
+        roots.add(Path(raw).expanduser())
+    for rp in referenced:
+        top = git_toplevel(rp)
+        if not top:
+            continue
+        roots.add(Path(top).parent)
+
+    seen_paths = set()
+    for root in sorted(roots, key=lambda p: str(p)):
+        if not root.exists() or not root.is_dir():
+            continue
+        try:
+            children = sorted(root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            try:
+                base = str(child.resolve())
+            except OSError:
+                continue
+            if base in seen_paths:
+                continue
+            seen_paths.add(base)
+            if not _is_clone_shaped(child):
+                continue
+            used = any(rp == base or rp.startswith(base + os.sep) for rp in referenced)
+            if used:
+                continue
             orphans.append({
                 "path": str(child),
                 "name": child.name,
+                "scan_root": str(root),
                 "size": human_size(du_kb(str(child))),
             })
     return orphans
@@ -753,7 +833,16 @@ def main():
                         help="Inventory mode: just list installed skills (no fetch, "
                              "no findings render). Output JSON gains `view: \"list\"`; "
                              "the SKILL.md presents only the roster from skills[].")
+    parser.add_argument("--scan-roots", default=None,
+                        help="Comma-separated extra directories to scan for "
+                             "orphaned skill clones. The default scan roots are "
+                             "~/.agents/skills/ (the install convention) plus the "
+                             "parents of any repos backing active skills "
+                             "(auto-derived). Use this to explicitly add more.")
     args = parser.parse_args()
+    extra_scan_roots = []
+    if args.scan_roots:
+        extra_scan_roots = [p.strip() for p in args.scan_roots.split(",") if p.strip()]
     # --list implies --no-fetch (we're not asking about updates).
     do_fetch = not args.no_fetch and not args.list_mode
     only = None
@@ -907,13 +996,14 @@ def main():
         ))
 
     # --- Info: orphaned clones -------------------------------------------- #
-    orphaned_clones = find_orphaned_clones(skills, errors)
+    orphaned_clones = find_orphaned_clones(skills, extra_scan_roots, errors)
     for oc in orphaned_clones:
         info.append(make_finding(
             "orphaned_clone",
-            "Orphaned clone in ~/.agents/skills",
-            "%s (%s) is a cloned skill repo that no active ~/.claude/skills symlink "
-            "points into. It occupies disk but isn't installed." % (oc["path"], oc["size"]),
+            "Orphaned skill clone",
+            "%s (%s) is a cloned skill repo (found under %s) that no active "
+            "~/.claude/skills symlink points into. It occupies disk but isn't "
+            "installed." % (oc["path"], oc["size"], oc["scan_root"]),
             [oc["name"]],
             handoff=None,
         ))
