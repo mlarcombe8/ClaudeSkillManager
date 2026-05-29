@@ -84,23 +84,34 @@ python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
 
 If the JSON's `view` is `"list"` (the user ran `/csm-skill-audit --list` or asked "what skills do I have"), **render just the installed-skills roster and stop**. Skip Suite Activity, the health summary, findings, and the scan prompt — those don't apply.
 
-Build the roster from `skills[]` (sorted by `install_name`). For each, show:
+Build the roster from `skills[]` (sorted by `install_name`). Open with a header that names the scope at a glance:
 
-- **Name** — `install_name`. If `declared_name` differs, show it in parentheses (the install/symlink name is what the user types).
-- **Source** — the repo basename from `git.repo_root` (or the `git.remote` host if it's terser); for non-git skills show `(non-git)`.
-- **Version** — `git.last_commit_date[:10]` + first 9 chars of the current HEAD if you have them; otherwise just the date.
-- **Status icon** — ✓ if `severity == "ok"`, ⚠ otherwise (broken/no-remote/no-git etc.).
+> *N skills installed, all user-global (under `~/.claude/skills/`).*
+
+(If `scope` is ever mixed across skills in the future, note "N user-global · M project-scoped" instead and add a scope column. Today all suite-managed skills are user-global.)
+
+For each skill, show **two lines** so the path is right there, not buried:
+
+- **Line 1 (headline):** status icon · **name** · source · version
+  - **Status icon** — ✓ if `severity == "ok"`, ⚠ otherwise (broken/no-remote/no-git etc.).
+  - **Name** — `install_name`. If `declared_name` differs, show it in parentheses (the install/symlink name is what the user types).
+  - **Source** — repo basename from `git.repo_root` (or the `git.remote` host if terser); for non-git skills show `(non-git)`.
+  - **Version** — first 9 chars of the current HEAD + `last_commit_date[:10]` when you have them.
+- **Line 2 (location):** the symlink path → resolved clone path, taken directly from the JSON:
+  - `<link_path> → <real_path>` — uses `~`-shortened home for readability.
+  - For a non-symlink (directly installed) skill, show just `<real_path>`.
 
 Suggested layout:
 
 ```
-📋 Installed skills (19)
+📋 21 skills installed, all user-global (under ~/.claude/skills/).
 
- ✓ csm-skill-install      ClaudeSkillManager   a0239f6  2026-05-24
- ✓ csm-skill-update       ClaudeSkillManager   a0239f6  2026-05-24
- ✓ impeccable             impeccable           a1b2c3d  2026-05-20
- ⚠ legacy-tool            (non-git)
- ...
+ ✓ csm-skill-install                     ClaudeSkillManager   a0239f6  2026-05-24
+     ~/.claude/skills/csm-skill-install → ~/ClaudeProjects/ClaudeSkillManager/csm-skill-install
+ ✓ impeccable                            impeccable           a1b2c3d  2026-05-20
+     ~/.claude/skills/impeccable → ~/.agents/skills/impeccable
+ ⚠ legacy-tool                           (non-git)
+     ~/.claude/skills/legacy-tool → ~/somewhere/legacy-tool
 ```
 
 After the roster, briefly mention what *else* the user could do — e.g. *"For health checks run `/csm-skill-audit`; for a security scan run `/csm-skill-audit --scan`."* — then stop.
@@ -304,7 +315,8 @@ python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
                 "last_security_scan": { "date", "skills_scanned" } | null,
                 "last_rollback": { "skill", "date", "to_commit", "from_commit" } | null,
                 "last_removal": { "skill", "date", "clone_removed", "bundle_removed" } | null },
-  "skills":  [ { "install_name", "declared_name", "link_path", "real_path",
+  "skills":  [ { "install_name", "declared_name", "scope": "user",
+                 "link_path", "real_path",
                  "is_symlink", "link_ok", "skillmd_present",
                  "git": { "is_repo", "repo_root", "has_remote", "remote", "branch",
                           "last_commit_date", "commits_behind", "fetch_ok", "fetch_error" },

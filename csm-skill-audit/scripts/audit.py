@@ -556,6 +556,10 @@ def _new_skill(name, link_path, real_path, is_symlink, link_ok, skillmd_present,
     return {
         "install_name": name,
         "declared_name": read_declared_name(skill_md) if skillmd_present else None,
+        # All currently-scanned skills live under ~/.claude/skills (user-global).
+        # Reserved for a future expansion that also scans project-scoped paths
+        # (<project>/.claude/skills); values will be "user" or "project" then.
+        "scope": "user",
         "link_path": link_path,
         "real_path": real_path,
         "is_symlink": is_symlink,
