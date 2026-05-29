@@ -82,9 +82,23 @@ Always clone and verify *before* removing anything, so a failed clone never leav
 
 ## Workflow
 
-**Scope: user-global vs project-scoped.** By default, installs are **user-global** — the symlink lives at `~/.claude/skills/<name>` and the skill is available in every Claude Code session. If the user passes **`--project`** (e.g. `/csm-skill-install <url> --project`), install the skill **into the current project** instead — the symlink lands at `<project_root>/.claude/skills/<name>` and is only active when Claude Code is launched inside that project tree.
+**Scope: user-global vs project-scoped.** A skill install can be **user-global** (symlink at `~/.claude/skills/<name>`, available in every Claude Code session) or **project-scoped** (symlink at `<project_root>/.claude/skills/<name>`, active only when Claude Code is launched inside that project tree). **The git clone itself always goes to `~/.agents/skills/<repo_name>/`** regardless of scope, so multiple projects can share one clone.
 
-Determine the project root for `--project` by walking up from the current working directory to the nearest ancestor containing a `.claude/skills/` directory (stop at `$HOME`); if none is found, treat the current working directory as the project root and create `<cwd>/.claude/skills/` (refuse if `cwd == $HOME` — that's the user-global scope). **The git clone itself always goes to `~/.agents/skills/<repo_name>/`** regardless of scope, so multiple projects can share one clone. Throughout the workflow below, `target_skills_dir` is `~/.claude/skills/` for user-global installs and `<project_root>/.claude/skills/` for project-scoped — use it instead of the hardcoded path.
+Resolve scope **before** STEP 5 using these rules in order:
+
+1. **`--project <path>` with an explicit path** (e.g. `/csm-skill-install <url> --project ~/ClaudeProjects/Foo`) — expand `~` to `$HOME`, resolve relative paths against `cwd`, and **refuse** if the result resolves to `$HOME` (that's the user-global scope, not a project). The path's parent must exist; `<path>/.claude/skills/` will be `mkdir -p`'d in STEP 5. Set `scope=project`, `project_root=<resolved-path>`.
+
+2. **`--project` with no value** (e.g. `/csm-skill-install <url> --project`) — walk up from `cwd` to the nearest ancestor containing a `.claude/skills/` directory, stopping at `$HOME`. If found, that ancestor is the project root. If none is found, treat `cwd` as the project root (refuse if `cwd == $HOME`). Set `scope=project`.
+
+3. **No scope flag** — check whether `cwd` is inside a project by walking up from `cwd` looking for `.claude/skills/`, stopping at `$HOME` (which never counts — that's user-global).
+   - **If a project root is found**, ask the user via the `AskUserQuestion` tool. Header: `Install scope`. Question: `Install user-globally, or into this project (<project_root>)?`. Two options:
+     1. `User-global` *(Recommended)* — *"Symlink under `~/.claude/skills/`; available in every session."*
+     2. `This project` — *"Symlink under `<project_root>/.claude/skills/`; only active inside this project."*
+
+     If they pick the project option, set `scope=project`, `project_root=<found>`. Otherwise (or if dismissed) set `scope=user`.
+   - **If no project root is found**, silently set `scope=user` — there is no useful question to ask.
+
+Throughout the workflow below, `target_skills_dir` is `~/.claude/skills/` when `scope=user` and `<project_root>/.claude/skills/` when `scope=project` — use it instead of any hardcoded path.
 
 ### STEP 1 — Identify the Skill Source
 
@@ -361,6 +375,8 @@ python3 ~/.claude/skills/csm-skill-install/../shared/csm_log.py \
 - **Private repo** — if clone fails due to auth, note that private repos require SSH keys or credentials set up in git.
 - **Symlink already exists but points nowhere** — clean up the broken symlink before creating a new one (`ln -sfn` handles repointing).
 - **User has customized existing skill files** — warn before replacing; the backup-before-destroy protocol preserves a recoverable copy in `/tmp`.
+- **`--project <path>` validation** — expand `~`, resolve relative paths against cwd, and refuse the install if the resolved path equals `$HOME` (that's user-global scope, not a project). If the path's parent doesn't exist, ask the user to confirm before creating it; otherwise `mkdir -p <path>/.claude/skills/` proceeds normally.
+- **Scope-ambiguous install (no flag, cwd inside a project)** — never silently default to project scope; always ask via `AskUserQuestion`. If the user dismisses the prompt, default to user-global. If they pick project, log the chosen `project_root` in STEP 7's structured fields.
 
 ---
 
