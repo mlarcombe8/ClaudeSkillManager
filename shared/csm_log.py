@@ -41,7 +41,8 @@ LOG_FILE = LOG_DIR / "csm.log"
 # Accepted values (not strictly enforced — logging stays forgiving — but
 # documented here and surfaced via --help so callers stay consistent).
 ACTIONS = ("installed", "reinstalled", "skipped", "failed", "checked",
-           "updated", "skipped-update", "rolled-back", "audit-run", "scan-run")
+           "updated", "skipped-update", "rolled-back", "uninstalled",
+           "audit-run", "scan-run")
 RESULTS = ("success", "failure", "up-to-date")
 
 # Standard fields are managed explicitly; extra --field entries may not clobber

@@ -33,6 +33,7 @@ Usage
   python3 audit.py             # standard audit (fetches remotes to check "behind")
   python3 audit.py --no-fetch  # skip network fetches; "behind" becomes unknown
   python3 audit.py --scan      # standard audit PLUS the deep security scan
+  python3 audit.py --list      # inventory mode: just list installed skills (no fetch)
 
 Output: pretty-printed JSON on stdout. Non-fatal problems are collected under
 the top-level "errors" array rather than crashing the run.
@@ -177,6 +178,7 @@ def read_activity():
         "last_update_check": None,
         "last_security_scan": None,
         "last_rollback": None,
+        "last_removal": None,
     }
     if not info["log_exists"]:
         return info
@@ -218,6 +220,13 @@ def read_activity():
             info["last_rollback"] = {
                 "skill": e.get("skill"), "date": date, "timestamp": ts,
                 "to_commit": e.get("to_commit"), "from_commit": e.get("from_commit"),
+                "details": e.get("details", ""),
+            }
+        elif action == "uninstalled":
+            info["last_removal"] = {
+                "skill": e.get("skill"), "date": date, "timestamp": ts,
+                "clone_removed": e.get("clone_removed"),
+                "bundle_removed": e.get("bundle_removed"),
                 "details": e.get("details", ""),
             }
     return info
@@ -740,8 +749,13 @@ def main():
     parser.add_argument("--skills", default=None,
                         help="Comma-separated install names to limit --scan to "
                              "(e.g. --skills impeccable,ui-ux-pro-max). Default: all.")
+    parser.add_argument("--list", dest="list_mode", action="store_true",
+                        help="Inventory mode: just list installed skills (no fetch, "
+                             "no findings render). Output JSON gains `view: \"list\"`; "
+                             "the SKILL.md presents only the roster from skills[].")
     args = parser.parse_args()
-    do_fetch = not args.no_fetch
+    # --list implies --no-fetch (we're not asking about updates).
+    do_fetch = not args.no_fetch and not args.list_mode
     only = None
     if args.skills:
         only = set(x.strip() for x in args.skills.split(",") if x.strip())
@@ -985,6 +999,7 @@ def main():
     output = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "view": "list" if args.list_mode else "full",
         "suite": suite,
         "scan_roots": [str(p) for p in SCAN_ROOTS],
         "fetched": do_fetch,

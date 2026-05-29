@@ -46,8 +46,9 @@ Each subfolder is a self-contained skill (its own `SKILL.md`); Claude Code disco
 | [`csm-skill-install`](csm-skill-install/) | Installs Claude Code skills via `git clone` with a remote. Triggers on "install skill", "add skill", "get skill", "set up X". |
 | [`csm-skill-update`](csm-skill-update/) | Scans installed skills, groups them by the git repo that backs them, fetches and diffs available updates, summarizes changes in plain English, flags security concerns, and applies only the updates you approve. |
 | [`csm-skill-finder`](csm-skill-finder/) | Discovers skills from the open ecosystem (`npx skills find`, the skills.sh leaderboard), vets candidates by install count/source/stars, and hands off installs to `/csm-skill-install`. |
-| [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Also offers a **deep security scan** (`--scan`) that analyzes each skill's contents for risky behavior. Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
+| [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Also offers a **deep security scan** (`--scan`) that analyzes each skill's contents for risky behavior, and an inventory mode (`--list`) that just lists what's installed. Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
 | [`csm-skill-rollback`](csm-skill-rollback/) | Rolls an installed skill back to a previous version. Lists rollback points (git history), shows a diff, and security-checks the target version before applying, then rolls back via git. Works for skills installed *or* updated by the suite. Invoke as `/csm-skill-rollback <skill>`. |
+| [`csm-skill-remove`](csm-skill-remove/) | Removes an installed skill thoroughly: the symlink, and (when safe) its backing git clone. Detects multi-skill bundles so it never orphans siblings, takes a backup before deleting, double-confirms when removing a suite skill itself, and logs the result. Invoke as `/csm-skill-remove <skill>`. |
 
 ## Security
 
@@ -119,7 +120,7 @@ Example line:
 {"timestamp": "2026-05-24T10:30:00-04:00", "skill": "all", "action": "scan-run", "source": "", "result": "success", "skills_scanned": 19, "overall_score": 84, "details": "Security scan of 19 skills; overall 84/100 (B); scope all"}
 ```
 
-`csm-skill-audit` reads this log and prints a short **Suite Activity** summary — last install, last update check, last security scan — at the top of every audit (or "No activity logged yet" when the log is empty). The log is written by the shared `shared/csm_log.py` helper and lives **outside the repo** in your home directory; the repo's `.gitignore` also excludes `~/.csm`-style paths so a log can never be committed by accident.
+`csm-skill-audit` reads this log and prints a short **Suite Activity** summary — last install, last update check, last security scan, last rollback, last removal — at the top of every audit (or "No activity logged yet" when the log is empty). The log is written by the shared `shared/csm_log.py` helper and lives **outside the repo** in your home directory; the repo's `.gitignore` also excludes `~/.csm`-style paths so a log can never be committed by accident.
 
 ## Repository layout
 
@@ -140,8 +141,11 @@ ClaudeSkillManager/
 │   └── references/           # incl. upstream-baseline.md for drift detection
 ├── csm-skill-audit/
 │   ├── SKILL.md
-│   └── scripts/              # audit.py (read-only health scan, + --scan security scan → JSON)
-└── csm-skill-rollback/
+│   └── scripts/              # audit.py (health scan, + --scan security scan, + --list inventory → JSON)
+├── csm-skill-rollback/
+│   ├── SKILL.md
+│   └── scripts/              # rollback_points.py (read-only: lists git rollback points)
+└── csm-skill-remove/
     ├── SKILL.md
-    └── scripts/              # rollback_points.py (read-only: lists git rollback points)
+    └── scripts/              # remove_plan.py (read-only: builds a removal plan, JSON)
 ```

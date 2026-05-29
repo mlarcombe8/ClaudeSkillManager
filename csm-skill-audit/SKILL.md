@@ -1,6 +1,6 @@
 ---
 name: csm-skill-audit
-description: Audit the health of your installed Claude Code skills and optionally run a deep security scan of their contents. Use this skill when the user wants to check their skill library's health, run a skill audit, find broken or misconfigured skills, check for drift from upstream, see a skill health score, clean up orphaned skill files, or security-scan their skills for risky behavior (shell execution, credential harvesting, obfuscation, scope/permission changes). Trigger on phrases like "audit my skills", "skill health check", "are my skills healthy", "check my skill library", "what's wrong with my skills", "skill audit", "security scan my skills", "are my skills safe", or running "/csm-skill-audit --scan".
+description: Audit the health of your installed Claude Code skills, list what's installed, and optionally run a deep security scan of their contents. Use this skill when the user wants to check their skill library's health, list/see what skills are installed, run a skill audit, find broken or misconfigured skills, check for drift from upstream, see a skill health score, clean up orphaned skill files, or security-scan their skills for risky behavior (shell execution, credential harvesting, obfuscation, scope/permission changes). Trigger on phrases like "audit my skills", "skill health check", "list my skills", "what skills do I have", "what skills are installed", "show me my skills", "skill list", "are my skills healthy", "check my skill library", "what's wrong with my skills", "skill audit", "security scan my skills", "are my skills safe", "/csm-skill-audit --list", or "/csm-skill-audit --scan".
 ---
 
 # Skill Audit
@@ -15,8 +15,9 @@ ClaudeSkillManager is a suite of skills designed to help you manage your Claude 
 - **csm-skill-install** — Installs skills properly via git clone, checks if already installed and whether installed correctly
 - **csm-skill-update** — Scans all installed skills for updates, reviews diffs, performs security checks, and applies approved updates
 - **csm-skill-finder** — Discovers skills from the open ecosystem and hands off to `/csm-skill-install`
-- **csm-skill-audit** *(this skill)* — Audits your entire skill library for health and updatability, plus an optional **deep security scan** that statically analyzes each skill's contents
+- **csm-skill-audit** *(this skill)* — Audits your entire skill library for health and updatability, plus an optional **deep security scan** that statically analyzes each skill's contents; also lists installed skills (`--list`)
 - **csm-skill-rollback** — Rolls an installed skill back to a previous version, showing a diff and a security check of the target first
+- **csm-skill-remove** — Removes an installed skill thoroughly (symlink + clone when safe), with multi-skill bundle awareness and a backup before deleting
 - *More skills will be added to the suite over time*
 
 **GitHub:** `https://github.com/mlarcombe8/ClaudeSkillManager`
@@ -68,6 +69,7 @@ The **deep security scan** reuses the same three levels, applied to *behavior in
 **Invocation modes:**
 - **`/csm-skill-audit`** (default) — run the standard audit (STEP 1–4), then **always** offer the deep security scan (STEP 5). Only run the scan (STEP 6) if the user accepts.
 - **`/csm-skill-audit --scan`** — the user explicitly wants the security scan. Run `audit.py --scan` once, present the standard audit **and** the security scan, and **skip** the STEP 5 prompt (they already opted in).
+- **`/csm-skill-audit --list`** — inventory only ("what skills do I have?"). Run `audit.py --list` (which implies `--no-fetch`), present **just** the installed-skills roster (see STEP 1L below), and **skip** everything else: Suite Activity, health summary, findings, and the scan prompt. The JSON sets `view: "list"` so you know.
 
 ### STEP 1 — Run the audit script
 
@@ -77,6 +79,31 @@ python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
 
 - This fetches each git-backed repo to check whether it's behind. If the user is offline or wants a fast local-only pass, add `--no-fetch` (then "behind on updates" is reported as *unknown* rather than a number).
 - The script prints JSON to stdout. Parse it; do not show the raw JSON to the user unless they ask.
+
+### STEP 1L — List-mode short-circuit (only when `view: "list"`)
+
+If the JSON's `view` is `"list"` (the user ran `/csm-skill-audit --list` or asked "what skills do I have"), **render just the installed-skills roster and stop**. Skip Suite Activity, the health summary, findings, and the scan prompt — those don't apply.
+
+Build the roster from `skills[]` (sorted by `install_name`). For each, show:
+
+- **Name** — `install_name`. If `declared_name` differs, show it in parentheses (the install/symlink name is what the user types).
+- **Source** — the repo basename from `git.repo_root` (or the `git.remote` host if it's terser); for non-git skills show `(non-git)`.
+- **Version** — `git.last_commit_date[:10]` + first 9 chars of the current HEAD if you have them; otherwise just the date.
+- **Status icon** — ✓ if `severity == "ok"`, ⚠ otherwise (broken/no-remote/no-git etc.).
+
+Suggested layout:
+
+```
+📋 Installed skills (19)
+
+ ✓ csm-skill-install      ClaudeSkillManager   a0239f6  2026-05-24
+ ✓ csm-skill-update       ClaudeSkillManager   a0239f6  2026-05-24
+ ✓ impeccable             impeccable           a1b2c3d  2026-05-20
+ ⚠ legacy-tool            (non-git)
+ ...
+```
+
+After the roster, briefly mention what *else* the user could do — e.g. *"For health checks run `/csm-skill-audit`; for a security scan run `/csm-skill-audit --scan`."* — then stop.
 
 ### STEP 2 — Show Suite Activity, then the health summary
 
@@ -88,12 +115,14 @@ python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
    Last update check:   2026-05-23
    Last security scan:  2026-05-22 (19 skills scanned)
    Last rollback:       impeccable on 2026-05-21
+   Last removal:        legacy-tool on 2026-05-20
 ```
 
 - **Last install** → `activity.last_install.skill` + `date`.
 - **Last update check** → `activity.last_update_check.date`.
 - **Last security scan** → `activity.last_security_scan.date`, plus `(N skills scanned)` from `skills_scanned` (drop the parenthetical if it's `null`).
 - **Last rollback** → `activity.last_rollback.skill` + `date`.
+- **Last removal** → `activity.last_removal.skill` + `date`.
 
 **Then** lead with the health score and a one-line verdict, then the counts. Example:
 
@@ -268,11 +297,13 @@ python3 ~/.claude/skills/csm-skill-audit/../shared/csm_log.py \
   "scoring": { "per_critical", "per_warning", "per_info", "note" },
   "storage": { "root", "total", "total_kb", "by_repo": [ { "name", "size" } ] },
   "scan_preview": { "skills", "files", "scripts", "total_bytes", "total_size" },
+  "view": "full" | "list",   // "list" when invoked with --list (inventory only)
   "activity": { "log_path", "log_exists", "entries",
                 "last_install": { "skill", "date", "action" } | null,
                 "last_update_check": { "date" } | null,
                 "last_security_scan": { "date", "skills_scanned" } | null,
-                "last_rollback": { "skill", "date", "to_commit", "from_commit" } | null },
+                "last_rollback": { "skill", "date", "to_commit", "from_commit" } | null,
+                "last_removal": { "skill", "date", "clone_removed", "bundle_removed" } | null },
   "skills":  [ { "install_name", "declared_name", "link_path", "real_path",
                  "is_symlink", "link_ok", "skillmd_present",
                  "git": { "is_repo", "repo_root", "has_remote", "remote", "branch",
