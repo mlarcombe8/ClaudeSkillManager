@@ -63,9 +63,10 @@ Branch on `status`:
 
 | `status` | What it means | What to do |
 | --- | --- | --- |
-| `not-installed` | No such skill under `~/.claude/skills` | Tell the user; suggest `/csm-skill-audit --list`. Stop. |
+| `not-installed` | No such skill under `~/.claude/skills` (or the current project's `.claude/skills`) | Tell the user; suggest `/csm-skill-audit --list`. Stop. |
+| `multiple-scopes` | Skill is installed at **both** user-global and project scope | Ask the user which they meant (use `AskUserQuestion` with `alternative_scopes` as options), then re-run `remove_plan.py <skill> --scope <user\|project>` and continue. |
 | `broken-symlink` | A dangling symlink — target gone | Easy case: just `rm` the link. Confirm briefly, do it, log it (STEP 7). No backup needed (nothing else to clean up). |
-| `ok` | Installed and resolvable | Continue. |
+| `ok` | Installed and resolvable | Continue. The chosen scope is in `scope`; surface it when describing what will be removed ("removing the *user-global* `<skill>` symlink…"). |
 
 ### STEP 2b — Suite-skill protection (DOUBLE confirmation)
 
@@ -106,14 +107,27 @@ If the backup is empty or wrong, **STOP** — don't `rm -rf` anything until the 
 
 Run the steps required by the plan, in this order, surfacing any errors:
 
-```bash
-# 1. Whole-bundle case: remove every sibling symlink too.
-for s in <bundle_symlinks_to_remove>; do
-  rm "$HOME/.claude/skills/$s"
-done
+Use the **actual `link_path`s the plan reports** — `removal_plan.symlink_to_remove` for the named skill (already at the correct scope, user or project), and each entry in `bundle_symlinks_to_remove` is `{install_name, scope}` so the right path is `~/.claude/skills/<install_name>` for `scope: user` and `<project_root>/.claude/skills/<install_name>` for `scope: project`. Don't hardcode `~/.claude/skills` — that's wrong for project-scoped members.
 
-# 2. Always: remove the named skill's symlink (or directly-installed dir).
-rm -rf "$HOME/.claude/skills/<skill>"
+```bash
+# 1. Whole-bundle case: remove every sibling symlink too. Compute each
+#    sibling's path from its scope (user vs project).
+#    bundle_symlinks_to_remove is [{install_name, scope}, ...]
+while read -r sib_name sib_scope; do
+  [ -z "$sib_name" ] && continue
+  if [ "$sib_scope" = "project" ]; then
+    rm "<project_root>/.claude/skills/$sib_name"
+  else
+    rm "$HOME/.claude/skills/$sib_name"
+  fi
+done <<'SIBS'
+<sib_install_name_1> <sib_scope_1>
+<sib_install_name_2> <sib_scope_2>
+SIBS
+
+# 2. Always: remove the named skill's symlink (or directly-installed dir),
+#    using the exact path the plan reported.
+rm -rf "<removal_plan.symlink_to_remove>"
 
 # 3. Only if removal_plan.clone_to_remove is non-null (single-skill clone OR
 #    whole-bundle case): delete the backing clone.
@@ -121,7 +135,7 @@ rm -rf "<clone_to_remove>"
 ```
 
 Notes:
-- For a **non-git, directly installed** skill (a real dir at `~/.claude/skills/<name>`), step 2 (`rm -rf` the dir) is the whole removal — no clone exists. The plan reflects this with `clone_to_remove: null`.
+- For a **non-git, directly installed** skill (a real dir at the link path), step 2 (`rm -rf` the dir) is the whole removal — no clone exists. The plan reflects this with `clone_to_remove: null`.
 - Never use `2>/dev/null` here — surface errors.
 
 ### STEP 6 — Verify
@@ -146,7 +160,8 @@ Record it with the shared logger (best-effort — never block on logging). Use t
 ```bash
 python3 ~/.claude/skills/csm-skill-remove/../shared/csm_log.py \
   --skill <skill> --action uninstalled --source <remote_url> --result success \
-  --field clone_removed=<true|false> --field bundle_removed=<true|false> \
+  --field scope=<user|project> --field clone_removed=<true|false> --field bundle_removed=<true|false> \
+  $( [ "<scope>" = "project" ] && printf -- '--field project_root=%q ' "<project_root>" ) \
   --details "Removed <skill>; <symlink only | clone too | whole bundle (<siblings>)>; backup: <backup-path or 'n/a'>"
 ```
 

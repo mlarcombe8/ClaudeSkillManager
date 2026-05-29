@@ -66,11 +66,12 @@ Branch on `status` before going further:
 
 | `status` | What it means | What to do |
 | --- | --- | --- |
-| `not-installed` | No such skill under `~/.claude/skills` | Tell the user; suggest `/csm-skill-audit` to see what's installed, or `/csm-skill-finder` to find one. Stop. |
+| `not-installed` | No such skill under `~/.claude/skills` (or the current project's `.claude/skills`) | Tell the user; suggest `/csm-skill-audit --list` to see what's installed, or `/csm-skill-finder` to find one. Stop. |
+| `multiple-scopes` | Skill is installed at **both** user-global and project scope | Ask the user which they meant (use `AskUserQuestion` with `alternative_scopes` as options), then re-run `rollback_points.py <skill> --scope <user\|project>` and continue. |
 | `broken-symlink` | The skill link points nowhere | Report it; hand off to **`/csm-skill-install`** to reinstall. Stop. |
 | `not-git` | Installed without a git repo (e.g. `npx`/manual copy) | Explain there's **no version history to roll back to**; hand off to **`/csm-skill-install`** to make it git-managed. Stop. |
 | `no-history` | Git-managed but only one version exists | Tell the user there's no earlier version to roll back to. Stop. |
-| `ok` | Rollback points exist | Continue. |
+| `ok` | Rollback points exist | Continue. The chosen scope is in `scope`; note it when describing the rollback ("rolling back the *user-global* `<skill>`..."). |
 
 Also: if `has_remote` is `false`, note that rolling *forward* again later won't be possible via `/csm-skill-update` (no remote to pull from) — the rollback itself still works.
 
@@ -163,7 +164,8 @@ Record it with the shared logger (best-effort — never block on logging). Use t
 ```bash
 python3 ~/.claude/skills/csm-skill-rollback/../shared/csm_log.py \
   --skill <skill> --action rolled-back --source <remote_url> --result success \
-  --field from_commit=<from_short> --field to_commit=<target_short> \
+  --field scope=<user|project> --field from_commit=<from_short> --field to_commit=<target_short> \
+  $( [ "<scope>" = "project" ] && printf -- '--field project_root=%q ' "<project_root>" ) \
   --details "Rolled back from <from_short> to <target_short> (<target subject>)"
 ```
 

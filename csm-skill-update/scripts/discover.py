@@ -2,26 +2,32 @@
 """
 Skill Update Discovery Script
 
-Scans installed skills under ~/.claude/skills and ~/.agents/skills, resolves each
-to its real location, finds the enclosing git repo root, and GROUPS skills by repo.
+Scans installed skills under ~/.claude/skills (user-global) and — when the
+script is invoked inside a project tree — also under <project_root>/.claude/skills
+(project-scoped). For each, resolves the symlink to its real location, finds the
+enclosing git repo root, and GROUPS skills by repo.
 
-This is multi-skill-repo aware: when one git repo backs several installed skills
-(a bundle/monorepo), they are reported together under that repo, because a single
-`git pull` updates all of them at once. Skills with no git root are reported
-separately as "cannot be auto-updated".
+Multi-skill-repo aware: when one git repo backs several installed skills
+(a bundle / monorepo, or the same skill linked from both scopes), they are
+reported together under that repo, because a single `git pull` updates all of
+them at once. Skills with no git root are reported separately as "cannot be
+auto-updated".
 
 Outputs JSON:
 {
+  "project_root": "<path>|null",
   "summary": {...},
   "repos": [
      {
        "repo_path", "remote", "is_git", "is_multi_skill",
        "current_branch", "last_updated", "commits_behind", "has_updates",
        "error",
-       "skills": [ {"install_name", "declared_name", "subpath", "link_path"} , ... ]
+       "skills": [ {"install_name", "declared_name", "subpath", "link_path",
+                    "scope": "user|project", "project_root": "<path>|null"} , ... ]
      }, ...
   ],
-  "non_git_skills": [ {"install_name", "declared_name", "path", "link_path"} , ... ]
+  "non_git_skills": [ {"install_name", "declared_name", "path", "link_path",
+                       "scope", "project_root"} , ... ]
 }
 """
 
@@ -31,8 +37,6 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-
-SKILL_DIRS = [Path.home() / ".claude" / "skills", Path.home() / ".agents" / "skills"]
 
 
 def run(cmd, cwd=None):
@@ -47,6 +51,28 @@ def git_toplevel(path):
     if rc != 0 or not out:
         return None
     return Path(out)
+
+
+def find_project_root(start=None):
+    """Walk up from `start` (default cwd) to the nearest ancestor that holds
+    a `.claude/skills/` directory, stopping at $HOME or filesystem root.
+    Returns a string path or None. `$HOME` itself is never returned —
+    `~/.claude/skills/` is the *user-global* scope, not a project scope.
+    """
+    home = Path.home().resolve()
+    try:
+        p = Path(start).resolve() if start else Path.cwd().resolve()
+    except OSError:
+        return None
+    while True:
+        if p == home:
+            return None
+        if (p / ".claude" / "skills").is_dir():
+            return str(p)
+        parent = p.parent
+        if parent == p:
+            return None
+        p = parent
 
 
 def read_declared_name(skill_md):
@@ -68,16 +94,23 @@ def read_declared_name(skill_md):
     return None
 
 
-def collect_installed():
-    """Collect installed skill entries from both skill dirs, deduped by real path.
+def collect_installed(project_root):
+    """Collect installed skills from user-global + (when applicable) project.
 
-    Returns a list of dicts: {install_name, link_path, real_path, skill_md, declared_name}.
-    Only entries whose resolved directory contains a SKILL.md count as installed skills,
-    so bare repo roots (e.g. a bundle root with no top-level SKILL.md) are skipped here
-    and instead surface via their member skills' symlinks.
+    Each entry tracks `scope` so update presentation and logging can name the
+    install precisely. The user-global and project-scoped paths are scanned
+    separately, so a skill installed in both scopes shows up as two entries
+    (different link_paths, possibly same install_name) — accurate, because a
+    pull at the shared clone root affects both symlinks.
     """
-    entries = {}
-    for base in SKILL_DIRS:
+    entries = []
+    locations = [(Path.home() / ".claude" / "skills", "user", None)]
+    if project_root:
+        proj_dir = Path(project_root) / ".claude" / "skills"
+        if proj_dir.is_dir():
+            locations.append((proj_dir, "project", project_root))
+
+    for base, scope, proj in locations:
         if not base.exists():
             continue
         for item in sorted(base.iterdir()):
@@ -88,17 +121,16 @@ def collect_installed():
             skill_md = real / "SKILL.md"
             if not skill_md.is_file():
                 continue
-            key = str(real)
-            if key in entries:
-                continue  # same physical skill reached via two dirs
-            entries[key] = {
+            entries.append({
                 "install_name": item.name,
                 "link_path": str(item),
                 "real_path": str(real),
+                "scope": scope,
+                "project_root": proj,
                 "skill_md": str(skill_md),
                 "declared_name": read_declared_name(skill_md),
-            }
-    return list(entries.values())
+            })
+    return entries
 
 
 def rel_subpath(real_path, root):
@@ -109,9 +141,11 @@ def rel_subpath(real_path, root):
 
 
 def main():
-    installed = collect_installed()
+    project_root = find_project_root()
+    installed = collect_installed(project_root)
     if not installed:
         print(json.dumps({
+            "project_root": project_root,
             "summary": {"installed_skills": 0, "git_repos": 0, "git_skills": 0,
                         "multi_skill_repos": 0, "repos_with_updates": 0,
                         "non_git_skills": 0, "scanned_at": datetime.now().isoformat()},
@@ -128,6 +162,8 @@ def main():
             non_git.append({
                 "install_name": e["install_name"],
                 "declared_name": e["declared_name"],
+                "scope": e["scope"],
+                "project_root": e["project_root"],
                 "path": e["real_path"],
                 "link_path": e["link_path"],
                 "is_git": False,
@@ -150,6 +186,8 @@ def main():
         repos[rk]["skills"].append({
             "install_name": e["install_name"],
             "declared_name": e["declared_name"],
+            "scope": e["scope"],
+            "project_root": e["project_root"],
             "subpath": rel_subpath(e["real_path"], root),
             "link_path": e["link_path"],
         })
@@ -157,7 +195,7 @@ def main():
     # Enrich each repo with git status + a fetch (errors are surfaced, never hidden).
     for rk, info in repos.items():
         info["is_multi_skill"] = len(info["skills"]) > 1
-        info["skills"].sort(key=lambda s: s["install_name"])
+        info["skills"].sort(key=lambda s: (s["install_name"], s["scope"]))
 
         remote, _, _ = run("git remote get-url origin", cwd=rk)
         info["remote"] = remote or None
@@ -184,10 +222,11 @@ def main():
             info["has_updates"] = info["commits_behind"] > 0
 
     repo_list = sorted(repos.values(), key=lambda r: r["repo_path"])
-    non_git_sorted = sorted(non_git, key=lambda s: s["install_name"])
+    non_git_sorted = sorted(non_git, key=lambda s: (s["install_name"], s["scope"]))
 
     git_skills = sum(len(r["skills"]) for r in repo_list)
     output = {
+        "project_root": project_root,
         "summary": {
             "installed_skills": git_skills + len(non_git_sorted),
             "git_repos": len(repo_list),

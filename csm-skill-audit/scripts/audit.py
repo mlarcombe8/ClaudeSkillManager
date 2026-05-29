@@ -53,6 +53,29 @@ CLAUDE_SKILLS = Path.home() / ".claude" / "skills"
 AGENTS_SKILLS = Path.home() / ".agents" / "skills"
 SCAN_ROOTS = [CLAUDE_SKILLS, AGENTS_SKILLS]
 
+
+def find_project_root(start=None):
+    """Walk up from `start` (default cwd) to the nearest ancestor that holds
+    a `.claude/skills/` directory, stopping at $HOME or filesystem root.
+
+    Returns a string path or None. `$HOME` itself is never returned —
+    `~/.claude/skills/` is the *user-global* scope, not a project scope.
+    """
+    home = Path.home().resolve()
+    try:
+        p = Path(start).resolve() if start else Path.cwd().resolve()
+    except OSError:
+        return None
+    while True:
+        if p == home:
+            return None
+        if (p / ".claude" / "skills").is_dir():
+            return str(p)
+        parent = p.parent
+        if parent == p:
+            return None
+        p = parent
+
 # Health scoring (kept in sync with SKILL.md).
 SCORE_CRITICAL = 25
 SCORE_WARNING = 8
@@ -552,14 +575,16 @@ def run_security_scan(skills, patterns_source, patterns_loaded, only=None):
 # --------------------------------------------------------------------------- #
 # Discovery
 # --------------------------------------------------------------------------- #
-def _new_skill(name, link_path, real_path, is_symlink, link_ok, skillmd_present, skill_md):
+def _new_skill(name, link_path, real_path, is_symlink, link_ok, skillmd_present,
+               skill_md, scope, project_root):
     return {
         "install_name": name,
         "declared_name": read_declared_name(skill_md) if skillmd_present else None,
-        # All currently-scanned skills live under ~/.claude/skills (user-global).
-        # Reserved for a future expansion that also scans project-scoped paths
-        # (<project>/.claude/skills); values will be "user" or "project" then.
-        "scope": "user",
+        # "user"  — symlinked from ~/.claude/skills (global, every session)
+        # "project" — symlinked from <project_root>/.claude/skills (only when
+        #             Claude Code is launched inside that project tree)
+        "scope": scope,
+        "project_root": project_root,  # null for user-global
         "link_path": link_path,
         "real_path": real_path,
         "is_symlink": is_symlink,
@@ -573,64 +598,75 @@ def _new_skill(name, link_path, real_path, is_symlink, link_ok, skillmd_present,
     }
 
 
-def discover_active_skills(errors):
-    """Enumerate the *active* installed skills under ~/.claude/skills.
-
-    ~/.claude/skills is what Claude Code actually loads, so it is the canonical
-    "installed" set. ~/.agents/skills holds the clones/sources and is used only
-    for orphan detection.
-
-    Classification matters: a *symlink* is intended as a skill, so a symlink with
-    a missing target or no SKILL.md is a genuine (critical) problem. A *plain
-    file or directory* sitting in ~/.claude/skills that has no SKILL.md is NOT a
-    skill — it's stray/orphaned content (e.g. leftover `data/` and `scripts/`
-    from an old flat install) and is reported as info, not critical.
-
-    Returns (skills, orphaned_files, orphaned_dirs).
-    """
-    skills = []
-    orphaned_files = []
-    orphaned_dirs = []
-    if not CLAUDE_SKILLS.exists():
-        errors.append("scan root missing: %s" % CLAUDE_SKILLS)
-        return skills, orphaned_files, orphaned_dirs
-
-    for item in sorted(CLAUDE_SKILLS.iterdir()):
+def _enumerate_skills_dir(scan_dir, scope, project_root, skills, orphaned_files, orphaned_dirs):
+    """Walk a `.claude/skills/` directory once, appending skills/orphans found."""
+    for item in sorted(scan_dir.iterdir()):
         name = item.name
 
-        # ---- real (non-symlink) entries -------------------------------- #
         if not item.is_symlink():
             if item.is_file():
-                # A loose file (e.g. a SKILL.md dropped at the root) — orphaned.
                 orphaned_files.append({
-                    "path": str(item), "name": name, "size": human_size(du_kb(str(item))),
+                    "path": str(item), "name": name,
+                    "scope": scope, "project_root": project_root,
+                    "size": human_size(du_kb(str(item))),
                 })
                 continue
             if item.is_dir():
                 skill_md = item / "SKILL.md"
                 if skill_md.is_file():
-                    # A directly-installed skill (flat / npx / manual copy).
                     skills.append(_new_skill(
                         name, str(item), str(item.resolve()),
-                        is_symlink=False, link_ok=True, skillmd_present=True, skill_md=skill_md,
+                        is_symlink=False, link_ok=True, skillmd_present=True,
+                        skill_md=skill_md, scope=scope, project_root=project_root,
                     ))
                 else:
-                    # A non-skill directory living in the skills dir — orphaned.
                     orphaned_dirs.append({
-                        "path": str(item), "name": name, "size": human_size(du_kb(str(item))),
+                        "path": str(item), "name": name,
+                        "scope": scope, "project_root": project_root,
+                        "size": human_size(du_kb(str(item))),
                     })
                 continue
             continue  # sockets/fifos/etc — ignore
 
-        # ---- symlink entries (the suite's normal install shape) -------- #
         broken = not item.exists()
         real_path = os.path.realpath(str(item))
         skill_md = Path(real_path) / "SKILL.md"
         skillmd_present = (not broken) and skill_md.is_file()
         skills.append(_new_skill(
             name, str(item), real_path,
-            is_symlink=True, link_ok=not broken, skillmd_present=skillmd_present, skill_md=skill_md,
+            is_symlink=True, link_ok=not broken, skillmd_present=skillmd_present,
+            skill_md=skill_md, scope=scope, project_root=project_root,
         ))
+
+
+def discover_active_skills(errors, project_root=None):
+    """Enumerate the *active* installed skills.
+
+    Always scans `~/.claude/skills/` (user-global). If a project root is given
+    and `<project_root>/.claude/skills/` exists, scans that too and tags those
+    entries with `scope: "project"` (vs `scope: "user"`).
+
+    Same classification rules apply at either scope: a *symlink* with a missing
+    target or no SKILL.md is a genuine (critical) problem; a plain file or
+    directory with no SKILL.md is stray/orphaned content, not a broken skill.
+
+    Returns (skills, orphaned_files, orphaned_dirs).
+    """
+    skills = []
+    orphaned_files = []
+    orphaned_dirs = []
+
+    if CLAUDE_SKILLS.exists():
+        _enumerate_skills_dir(CLAUDE_SKILLS, "user", None,
+                              skills, orphaned_files, orphaned_dirs)
+    else:
+        errors.append("scan root missing: %s" % CLAUDE_SKILLS)
+
+    if project_root:
+        proj_skills_dir = Path(project_root) / ".claude" / "skills"
+        if proj_skills_dir.is_dir():
+            _enumerate_skills_dir(proj_skills_dir, "project", project_root,
+                                  skills, orphaned_files, orphaned_dirs)
 
     return skills, orphaned_files, orphaned_dirs
 
@@ -858,7 +894,8 @@ def main():
     warning = []
     info = []
 
-    skills, orphaned_files, orphaned_dirs = discover_active_skills(errors)
+    project_root = find_project_root()
+    skills, orphaned_files, orphaned_dirs = discover_active_skills(errors, project_root)
 
     # --- Critical: broken symlinks & missing SKILL.md ---------------------- #
     for s in skills:
@@ -1096,6 +1133,7 @@ def main():
         "view": "list" if args.list_mode else "full",
         "suite": suite,
         "scan_roots": [str(p) for p in SCAN_ROOTS],
+        "project_root": project_root,
         "fetched": do_fetch,
         "health": {"score": score, "grade": letter, "label": label},
         "counts": {

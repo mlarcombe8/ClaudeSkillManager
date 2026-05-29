@@ -66,48 +66,98 @@ def human_size(kb):
     return "%.1f GB" % size
 
 
-def resolve_skill(name):
-    """Look up ~/.claude/skills/<name>; None if not present."""
-    link = CLAUDE_SKILLS / name
-    if not (link.exists() or link.is_symlink()):
+def find_project_root(start=None):
+    """Walk up from cwd to the nearest dir with `.claude/skills/`, or None."""
+    home = Path.home().resolve()
+    try:
+        p = Path(start).resolve() if start else Path.cwd().resolve()
+    except OSError:
+        return None
+    while True:
+        if p == home:
+            return None
+        if (p / ".claude" / "skills").is_dir():
+            return str(p)
+        parent = p.parent
+        if parent == p:
+            return None
+        p = parent
+
+
+def _resolution_for(link_path, scope, project_root):
+    if not (link_path.exists() or link_path.is_symlink()):
         return None
     return {
-        "link_path": str(link),
-        "real_path": os.path.realpath(str(link)),
-        "link_ok": link.exists(),
-        "is_symlink": link.is_symlink(),
+        "scope": scope,
+        "project_root": project_root,
+        "link_path": str(link_path),
+        "real_path": os.path.realpath(str(link_path)),
+        "link_ok": link_path.exists(),
+        "is_symlink": link_path.is_symlink(),
     }
 
 
-def sibling_skills(repo_root, this_name):
-    """Other installed skills whose real path is inside the same repo."""
+def resolve_skill_scopes(name, project_root):
+    """Return every scope (user/project) where the named skill is installed."""
+    found = []
+    r = _resolution_for(CLAUDE_SKILLS / name, "user", None)
+    if r:
+        found.append(r)
+    if project_root:
+        r = _resolution_for(Path(project_root) / ".claude" / "skills" / name,
+                            "project", project_root)
+        if r:
+            found.append(r)
+    return found
+
+
+def sibling_skills(repo_root, this_name, this_scope, project_root):
+    """Other installed skills (across BOTH scopes) backed by the same repo.
+
+    Returns a list of {"install_name", "scope"} entries. The skill being
+    queried (this_name + this_scope) is excluded; siblings at the *other*
+    scope with the same name are still real siblings (a separate symlink)
+    and are reported.
+    """
     sibs = []
-    if not CLAUDE_SKILLS.exists():
-        return sibs
-    for item in sorted(CLAUDE_SKILLS.iterdir()):
-        if item.name == this_name:
+    locations = [(CLAUDE_SKILLS, "user")]
+    if project_root:
+        locations.append((Path(project_root) / ".claude" / "skills", "project"))
+    for base, scope in locations:
+        if not base.is_dir():
             continue
-        try:
-            real = os.path.realpath(str(item))
-        except OSError:
-            continue
-        if not Path(real).exists():
-            continue
-        root = git_toplevel(real)
-        if root and root == repo_root:
-            sibs.append(item.name)
+        for item in sorted(base.iterdir()):
+            if item.name == this_name and scope == this_scope:
+                continue
+            try:
+                real = os.path.realpath(str(item))
+            except OSError:
+                continue
+            if not Path(real).exists():
+                continue
+            root = git_toplevel(real)
+            if root and root == repo_root:
+                sibs.append({"install_name": item.name, "scope": scope})
     return sibs
 
 
 def main():
     ap = argparse.ArgumentParser(
         description="Build a removal plan for an installed skill (read-only).")
-    ap.add_argument("skill", help="The installed skill name (as in ~/.claude/skills).")
+    ap.add_argument("skill", help="The installed skill name (as in ~/.claude/skills "
+                                 "or the current project's .claude/skills).")
+    ap.add_argument("--scope", choices=("user", "project"), default=None,
+                    help="Disambiguate when a skill is installed at both scopes.")
     args = ap.parse_args()
     name = args.skill
 
+    project_root = find_project_root()
+
     out = {
         "skill": name,
+        "project_root": project_root,
+        "scope": None,
+        "alternative_scopes": [],
         "found": False,
         "link_path": None,
         "real_path": None,
@@ -128,27 +178,57 @@ def main():
         "removal_plan": None,
     }
 
-    info = resolve_skill(name)
-    if info is None:
+    locations = resolve_skill_scopes(name, project_root)
+    if not locations:
         out["status"] = "not-installed"
-        out["error"] = ("No skill named '%s' under ~/.claude/skills. Run "
+        out["error"] = ("No skill named '%s' under ~/.claude/skills (or the "
+                        "current project's .claude/skills, if any). Run "
                         "/csm-skill-audit --list to see what's installed." % name)
         print(json.dumps(out, indent=2))
         return
 
-    out["found"] = True
-    out["link_path"] = info["link_path"]
-    out["real_path"] = info["real_path"]
-    out["is_symlink"] = info["is_symlink"]
-    out["link_ok"] = info["link_ok"]
+    # Pick which symlink to remove. If --scope was given, honor it.
+    # Otherwise: if found in only one scope, use it; if both, ask the caller
+    # to disambiguate via a multi-scope status.
+    chosen = None
+    if args.scope:
+        for loc in locations:
+            if loc["scope"] == args.scope:
+                chosen = loc
+                break
+        if chosen is None:
+            out["status"] = "not-installed"
+            out["error"] = ("'%s' is not installed at the requested scope (%s). "
+                            "Available scopes: %s." %
+                            (name, args.scope,
+                             ", ".join(l["scope"] for l in locations)))
+            print(json.dumps(out, indent=2))
+            return
+    elif len(locations) > 1:
+        out["status"] = "multiple-scopes"
+        out["alternative_scopes"] = [l["scope"] for l in locations]
+        out["error"] = ("'%s' is installed at multiple scopes (%s); rerun with "
+                        "--scope <user|project> to choose which to remove." %
+                        (name, ", ".join(out["alternative_scopes"])))
+        print(json.dumps(out, indent=2))
+        return
+    else:
+        chosen = locations[0]
 
-    if not info["link_ok"]:
-        # Dangling symlink — still trivially removable (just rm the link).
+    out["scope"] = chosen["scope"]
+    out["found"] = True
+    out["link_path"] = chosen["link_path"]
+    out["real_path"] = chosen["real_path"]
+    out["is_symlink"] = chosen["is_symlink"]
+    out["link_ok"] = chosen["link_ok"]
+
+    if not chosen["link_ok"]:
         out["status"] = "broken-symlink"
-        out["error"] = ("~/.claude/skills/%s is a broken symlink (target %s is "
-                        "missing); only the symlink itself needs removing." % (name, info["real_path"]))
+        out["error"] = ("%s is a broken symlink (target %s is missing); only the "
+                        "symlink itself needs removing." %
+                        (chosen["link_path"], chosen["real_path"]))
         out["removal_plan"] = {
-            "symlink_to_remove": info["link_path"],
+            "symlink_to_remove": chosen["link_path"],
             "clone_to_remove": None,
             "bundle_symlinks_to_remove": [],
             "reason_to_keep_clone": "target missing; nothing else to clean up",
@@ -158,12 +238,12 @@ def main():
         return
 
     # Git status of the backing dir.
-    root = git_toplevel(info["real_path"])
+    root = git_toplevel(chosen["real_path"])
     if root is not None:
         out["is_git"] = True
         out["repo_root"] = root
         try:
-            out["subpath"] = os.path.relpath(info["real_path"], root) or "."
+            out["subpath"] = os.path.relpath(chosen["real_path"], root) or "."
         except ValueError:
             out["subpath"] = "?"
         remote, _, _ = run("git remote get-url origin", cwd=root)
@@ -174,13 +254,15 @@ def main():
         out["clone_size_kb"] = kb
         out["clone_size"] = human_size(kb)
 
-    sibs = sibling_skills(root, name) if root else []
+    sibs = sibling_skills(root, name, chosen["scope"], project_root) if root else []
     out["sibling_skills"] = sibs
     out["is_multi_skill"] = len(sibs) > 0
 
-    # Build the removal plan.
+    # Build the removal plan. `bundle_symlinks_to_remove` is now [{name, scope}]
+    # so the SKILL.md can compute the correct symlink path for each member.
     plan = {
-        "symlink_to_remove": info["link_path"],
+        "symlink_to_remove": chosen["link_path"],
+        "scope": chosen["scope"],
         "clone_to_remove": None,
         "bundle_symlinks_to_remove": [],
         "reason_to_keep_clone": None,
@@ -188,25 +270,19 @@ def main():
     }
 
     if root is None:
-        # Not git-managed: the "real path" *is* the skill content (a directly
-        # installed dir, or just a stray symlink target outside any git repo).
-        # Remove the symlink/dir but leave anything outside the skill's own
-        # footprint alone.
         plan["clone_to_remove"] = None
         plan["reason_to_keep_clone"] = ("not backed by a git clone; only the "
-                                        "link/dir at ~/.claude/skills/%s will be removed" % name)
+                                        "link/dir at %s will be removed" % chosen["link_path"])
         plan["needs_backup"] = False
     elif sibs:
-        # Multi-skill clone — never delete it just because one symlink is going.
-        # The SKILL.md offers "remove just this symlink" vs "remove the whole bundle".
         plan["clone_to_remove"] = None
-        plan["bundle_symlinks_to_remove"] = sibs  # only used if user chooses "whole bundle"
+        plan["bundle_symlinks_to_remove"] = sibs
+        sib_desc = ", ".join("%s (%s)" % (s["install_name"], s["scope"]) for s in sibs)
         plan["reason_to_keep_clone"] = ("backs %d other installed skill(s): %s. "
                                         "Removing the clone would orphan them." %
-                                        (len(sibs), ", ".join(sibs)))
-        plan["needs_backup"] = True   # bundle removal touches multiple skills
+                                        (len(sibs), sib_desc))
+        plan["needs_backup"] = True
     else:
-        # Single-skill clone — safe to delete the whole clone after the symlink.
         plan["clone_to_remove"] = root
         plan["reason_to_keep_clone"] = None
         plan["needs_backup"] = True

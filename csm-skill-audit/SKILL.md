@@ -84,11 +84,10 @@ python3 ~/.claude/skills/csm-skill-audit/scripts/audit.py
 
 If the JSON's `view` is `"list"` (the user ran `/csm-skill-audit --list` or asked "what skills do I have"), **render just the installed-skills roster and stop**. Skip Suite Activity, the health summary, findings, and the scan prompt — those don't apply.
 
-Build the roster from `skills[]` (sorted by `install_name`). Open with a header that names the scope at a glance:
+Build the roster from `skills[]` (sorted by `install_name`). Open with a header that names the scope at a glance — count each `scope` value:
 
-> *N skills installed, all user-global (under `~/.claude/skills/`).*
-
-(If `scope` is ever mixed across skills in the future, note "N user-global · M project-scoped" instead and add a scope column. Today all suite-managed skills are user-global.)
+- If all skills have `scope: "user"` → *"N skills installed, all user-global (under `~/.claude/skills/`)."*
+- If a `project_root` is set on the run AND some skills have `scope: "project"` → *"N skills installed: U user-global · P project-scoped (project root: `<project_root>`)."* Add a small scope marker (`[u]` / `[p]`) at the start of each entry's headline to disambiguate, and group project entries together so the project context is obvious.
 
 For each skill, show **two lines** so the path is right there, not buried:
 

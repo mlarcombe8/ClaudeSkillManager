@@ -63,6 +63,7 @@ It outputs JSON with two top-level lists:
 Present a clean summary to the user, **grouped by repo**:
 - Repo name + remote, commits behind, last updated.
 - For a **multi-skill repo**, list the member skills it provides and note: *"updating this repo updates all N of these skills together."*
+- For each member skill, tag its **`scope`** (`user` or `project`) — this matters when the same skill is linked from both scopes (a single `git pull` refreshes both symlinks since they share the clone). When `project_root` is set on the run, mention it in the header so the user knows project-scoped skills were included.
 - List `non_git_skills` separately as "cannot be auto-updated — reinstall via /csm-skill-install to manage them."
 
 If no repo has updates available, tell the user everything is up to date and stop (after handling any single-skill-target confirmation below, if relevant).

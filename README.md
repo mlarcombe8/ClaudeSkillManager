@@ -12,7 +12,7 @@ When a skill is installed by a plain file copy or download, it lives on your mac
 curl -fsSL https://raw.githubusercontent.com/mlarcombe8/ClaudeSkillManager/main/install.sh | sh
 ```
 
-This clones the suite and symlinks its four skills into `~/.claude/skills`. **Why a clone instead of a copy?** Installing as a `git clone` keeps a live remote back to GitHub, so the skills stay **updatable**, **rollback-able**, and **auditable** over time — none of which is possible with a plain file copy or `npx skills add`.
+This clones the suite and symlinks its six skills into `~/.claude/skills`. **Why a clone instead of a copy?** Installing as a `git clone` keeps a live remote back to GitHub, so the skills stay **updatable**, **rollback-able**, and **auditable** over time — none of which is possible with a plain file copy or `npx skills add`.
 
 The installer is POSIX `sh`, idempotent (it skips any skill that's already linked), and verifies every link before reporting success. When it finishes, **start a new Claude Code session** so the skills load.
 
@@ -49,6 +49,19 @@ Each subfolder is a self-contained skill (its own `SKILL.md`); Claude Code disco
 | [`csm-skill-audit`](csm-skill-audit/) | Audits your whole skill library and reports a health score with findings grouped by severity (broken symlinks, no git remote, behind on updates, drift, orphaned files). Also offers a **deep security scan** (`--scan`) that analyzes each skill's contents for risky behavior, and an inventory mode (`--list`) that just lists what's installed. Read-only — it hands off fixes to `csm-skill-install`/`csm-skill-update`. |
 | [`csm-skill-rollback`](csm-skill-rollback/) | Rolls an installed skill back to a previous version. Lists rollback points (git history), shows a diff, and security-checks the target version before applying, then rolls back via git. Works for skills installed *or* updated by the suite. Invoke as `/csm-skill-rollback <skill>`. |
 | [`csm-skill-remove`](csm-skill-remove/) | Removes an installed skill thoroughly: the symlink, and (when safe) its backing git clone. Detects multi-skill bundles so it never orphans siblings, takes a backup before deleting, double-confirms when removing a suite skill itself, and logs the result. Invoke as `/csm-skill-remove <skill>`. |
+
+## Scope — user-global vs project-scoped
+
+Claude Code supports two scopes for installed skills, and the suite is aware of both:
+
+| Scope | Symlink lives at | When it's loaded |
+| --- | --- | --- |
+| **`user`** *(default)* | `~/.claude/skills/<name>` | Every Claude Code session, anywhere |
+| **`project`** | `<project_root>/.claude/skills/<name>` | Only when launched inside that project tree |
+
+**`csm-skill-install` defaults to user-global**, so `/csm-skill-install <repo>` puts the skill in `~/.claude/skills/`. Pass **`--project`** to install into the current project instead — `/csm-skill-install <repo> --project` will create the symlink at `<project_root>/.claude/skills/<name>`. The git clone always goes to a shared `~/.agents/skills/<repo_name>/` regardless of scope, so a clone backing both user-global and project symlinks is updated by a single `git pull`.
+
+The other commands handle scope transparently: `csm-skill-audit --list` shows each skill's scope, `csm-skill-update` discovers and updates skills at both scopes when run inside a project, and `csm-skill-rollback` / `csm-skill-remove` ask you to disambiguate with `--scope user|project` if a skill happens to be installed at both.
 
 ## Security
 

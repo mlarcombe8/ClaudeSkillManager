@@ -30,6 +30,21 @@ Guidance for Claude Code (and other agents) working in this repository.
 - **If you relocate the clone**, re-point every symlink with `ln -sfn <new-clone>/<folder> ~/.claude/skills/<name>`. Nothing else needs changing — the `../shared/` references and the scripts all resolve *relative to the symlink target*, so they follow the clone automatically.
 - `install.sh` (POSIX `sh`) automates clone + symlinks; the README documents the one-line `curl | sh` and the manual steps.
 
+### Scope — user-global vs project-scoped
+
+Claude Code supports two skill scopes and the suite is aware of both:
+
+- **`user`** (default) — symlink at `~/.claude/skills/<name>`. Loaded in every session, anywhere.
+- **`project`** — symlink at `<project_root>/.claude/skills/<name>`. Only loaded when Claude Code is launched inside that project tree.
+
+**The clone always lives at `~/.agents/skills/<repo_name>/` regardless of scope** (or wherever the maintainer keeps it — only the symlink location varies). One clone can back both user-global and project-scoped symlinks; a single `git pull` updates everything backed by that clone.
+
+How each script handles it:
+- `audit.py`/`discover.py` walk up from cwd to detect a project root (first ancestor with `.claude/skills/`, stopping at `$HOME`). When found, they scan it *in addition to* `~/.claude/skills/` and tag each skill record with `scope` (`user`|`project`) and `project_root` (null for user).
+- `rollback_points.py` / `remove_plan.py` resolve a named skill at both scopes; if found in both, they return `status: "multiple-scopes"` with `alternative_scopes` and require the caller to re-run with `--scope user|project`.
+- `csm-skill-install`'s SKILL.md handles a `--project` flag: clone goes to `~/.agents/skills/<repo>`, symlink goes to `<project_root>/.claude/skills/<name>` (`mkdir -p` first); refuses `--project` when `cwd == $HOME`.
+- `csm_log.py` accepts `--field scope=<...>` and `--field project_root=<...>`; install/update/rollback/remove all log these.
+
 ## Repository layout
 
 ```

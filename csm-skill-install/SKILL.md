@@ -82,6 +82,10 @@ Always clone and verify *before* removing anything, so a failed clone never leav
 
 ## Workflow
 
+**Scope: user-global vs project-scoped.** By default, installs are **user-global** — the symlink lives at `~/.claude/skills/<name>` and the skill is available in every Claude Code session. If the user passes **`--project`** (e.g. `/csm-skill-install <url> --project`), install the skill **into the current project** instead — the symlink lands at `<project_root>/.claude/skills/<name>` and is only active when Claude Code is launched inside that project tree.
+
+Determine the project root for `--project` by walking up from the current working directory to the nearest ancestor containing a `.claude/skills/` directory (stop at `$HOME`); if none is found, treat the current working directory as the project root and create `<cwd>/.claude/skills/` (refuse if `cwd == $HOME` — that's the user-global scope). **The git clone itself always goes to `~/.agents/skills/<repo_name>/`** regardless of scope, so multiple projects can share one clone. Throughout the workflow below, `target_skills_dir` is `~/.claude/skills/` for user-global installs and `<project_root>/.claude/skills/` for project-scoped — use it instead of the hardcoded path.
+
 ### STEP 1 — Identify the Skill Source
 
 Ask the user for the GitHub URL or skill name if not already provided.
@@ -270,16 +274,18 @@ Apply the rules in **Execution Safety & Shell Portability** above: no hidden std
    ls ~/.agents/skills/<repo_name>/<subpath>/SKILL.md   # sanity-check each selected skill
    ```
 2. **(Only if converting existing non-git copies)** Run the backup-before-destroy protocol and verify the backup *before* removing the old folders.
-3. **Link each selected skill** by its install `name:`, pointing at its subpath in the clone. A skill at the repo root uses subpath `.`:
+3. **Link each selected skill** by its install `name:`, pointing at its subpath in the clone. A skill at the repo root uses subpath `.`. Symlink into **`target_skills_dir`** (set per the Workflow preamble — `~/.claude/skills/` for user-global, `<project_root>/.claude/skills/` for `--project`); `mkdir -p` it first so a fresh project install works:
    ```bash
    REPO="$HOME/.agents/skills/<repo_name>"
+   SKILLS_DIR="<target_skills_dir>"     # ~/.claude/skills for user, <project>/.claude/skills for project
+   mkdir -p "$SKILLS_DIR"
    while read -r name subpath; do
      [ -z "$name" ] && continue
      target="$REPO/$subpath"
      if [ ! -f "$target/SKILL.md" ]; then echo "ABORT: $target missing SKILL.md"; break; fi
      rm -rf "$HOME/.agents/skills/$name"          # only if an old non-git copy exists there
-     ln -sfn "$target" "$HOME/.claude/skills/$name"
-     echo "linked: $name -> $subpath"
+     ln -sfn "$target" "$SKILLS_DIR/$name"
+     echo "linked: $name -> $subpath  (scope: $(test "$SKILLS_DIR" = "$HOME/.claude/skills" && echo user || echo project))"
    done <<'PAIRS'
    <install_name_1> <subpath_1>
    <install_name_2> <subpath_2>
@@ -296,9 +302,10 @@ Apply the rules in **Execution Safety & Shell Portability** above: no hidden std
 Verify **every** installed/relinked skill, not just one:
 
 ```bash
+SKILLS_DIR="<target_skills_dir>"   # the same value used in STEP 5
 while read -r name; do
   [ -z "$name" ] && continue
-  link="$HOME/.claude/skills/$name"
+  link="$SKILLS_DIR/$name"
   printf '%-30s -> %s\n' "$name" "$(readlink "$link")"
   grep -m1 '^name:' "$link/SKILL.md" 2>/dev/null || echo "   !! SKILL.md unreadable"
   [ -e "$HOME/.agents/skills/$name" ] && echo "   !! old non-git copy still present at ~/.agents/skills/$name"
@@ -323,11 +330,14 @@ Record what happened (best-effort — logging must never block or fail the insta
 python3 ~/.claude/skills/csm-skill-install/../shared/csm_log.py \
   --skill <install_name> --action <installed|reinstalled> \
   --source <github_url> --result success \
-  --details "<one-line summary, e.g. 'Installed from <repo>; linked into ~/.claude/skills'>"
+  --field scope=<user|project> \
+  $( [ "<scope>" = "project" ] && printf -- '--field project_root=%q ' "<project_root>" ) \
+  --details "<summary, e.g. 'Installed from <repo>; linked into <target_skills_dir>'>"
 ```
 
 - Use **`installed`** for a fresh install (Decision Tree **C**).
 - Use **`reinstalled`** when you reinstalled an existing or improperly-installed skill (Decision Tree **B1**).
+- Always include the **`scope`** structured field; include `project_root` only when scope is `project`.
 
 **On failure** — if a clone, backup, link, or verification step fails (see STEP 5 and the Edge Cases), log it instead and report the error to the user:
 
