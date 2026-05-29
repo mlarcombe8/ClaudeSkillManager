@@ -88,15 +88,43 @@ Resolve scope **before** STEP 5 using these rules in order:
 
 1. **`--project <path>` with an explicit path** (e.g. `/csm-skill-install <url> --project ~/ClaudeProjects/Foo`) — expand `~` to `$HOME`, resolve relative paths against `cwd`, and **refuse** if the result resolves to `$HOME` (that's the user-global scope, not a project). The path's parent must exist; `<path>/.claude/skills/` will be `mkdir -p`'d in STEP 5. Set `scope=project`, `project_root=<resolved-path>`.
 
-2. **`--project` with no value** (e.g. `/csm-skill-install <url> --project`) — walk up from `cwd` to the nearest ancestor containing a `.claude/skills/` directory, stopping at `$HOME`. If found, that ancestor is the project root. If none is found, treat `cwd` as the project root (refuse if `cwd == $HOME`). Set `scope=project`.
+2. **`--project` with no value** (e.g. `/csm-skill-install <url> --project`) — walk up from `cwd` to the nearest ancestor containing a `.claude/skills/` directory, stopping at `$HOME`. If found, that ancestor is the project root. **If none is found**, run the **project picker** (see below) — if it returns a path, use that; if it has zero candidates and the user provides no path, treat `cwd` as the project root (refuse if `cwd == $HOME`). Set `scope=project`.
 
 3. **No scope flag** — check whether `cwd` is inside a project by walking up from `cwd` looking for `.claude/skills/`, stopping at `$HOME` (which never counts — that's user-global).
-   - **If a project root is found**, ask the user via the `AskUserQuestion` tool. Header: `Install scope`. Question: `Install user-globally, or into this project (<project_root>)?`. Two options:
+   - **If a project root is found**, ask the user via the `AskUserQuestion` tool. Header: `Install scope`. Question: `Install user-globally, or into this project (<project_root>)?`. Three options:
      1. `User-global` *(Recommended)* — *"Symlink under `~/.claude/skills/`; available in every session."*
      2. `This project` — *"Symlink under `<project_root>/.claude/skills/`; only active inside this project."*
+     3. `A different project…` — *"Choose another project from a list."*
 
-     If they pick the project option, set `scope=project`, `project_root=<found>`. Otherwise (or if dismissed) set `scope=user`.
+     Resolve the pick: `User-global` (or dismissed) → set `scope=user`. `This project` → set `scope=project`, `project_root=<found>`. `A different project…` → run the **project picker** below.
    - **If no project root is found**, silently set `scope=user` — there is no useful question to ask.
+
+**Project picker.** Used by rule 2 (no-ancestor fallback) and rule 3 ("A different project…"). Gather candidates and present them:
+
+1. **List candidate projects** under the user's projects directory (most-recently-touched first, up to 3):
+   ```bash
+   python3 - <<'PY'
+   import json
+   from pathlib import Path
+   root = Path.home() / "ClaudeProjects"
+   cands = []
+   if root.is_dir():
+       for d in root.iterdir():
+           sk = d / ".claude" / "skills"
+           if sk.is_dir():
+               cands.append((sk.stat().st_mtime, str(d)))
+   cands.sort(reverse=True)
+   print(json.dumps([p for _, p in cands[:3]]))
+   PY
+   ```
+
+2. **Present the picker**, branching on candidate count (`AskUserQuestion` requires 2-4 options):
+   - **2-3 candidates** — call `AskUserQuestion`. Header: `Project`. Question: `Which project should this skill be installed into?`. Each candidate is an option labeled with the project's basename (e.g. `LPEWebsite`) and described with its full path. The tool auto-includes an "Other" slot for the user to type a custom path; **do not** include it in the options array yourself.
+   - **0 or 1 candidates** — skip `AskUserQuestion` and ask the user for a path directly via a plain text prompt (offer the single candidate as a default when present).
+
+3. **Validate the resolved path** per rule 1: expand `~`, resolve relative paths against `cwd`, refuse if it equals `$HOME`, require the parent to exist. Then set `scope=project`, `project_root=<resolved-path>`.
+
+4. **On dismiss / empty path** — fall back to `scope=user` (silent). The user can re-run with explicit `--project <path>` if they want a different project.
 
 Throughout the workflow below, `target_skills_dir` is `~/.claude/skills/` when `scope=user` and `<project_root>/.claude/skills/` when `scope=project` — use it instead of any hardcoded path.
 
@@ -377,6 +405,7 @@ python3 ~/.claude/skills/csm-skill-install/../shared/csm_log.py \
 - **User has customized existing skill files** — warn before replacing; the backup-before-destroy protocol preserves a recoverable copy in `/tmp`.
 - **`--project <path>` validation** — expand `~`, resolve relative paths against cwd, and refuse the install if the resolved path equals `$HOME` (that's user-global scope, not a project). If the path's parent doesn't exist, ask the user to confirm before creating it; otherwise `mkdir -p <path>/.claude/skills/` proceeds normally.
 - **Scope-ambiguous install (no flag, cwd inside a project)** — never silently default to project scope; always ask via `AskUserQuestion`. If the user dismisses the prompt, default to user-global. If they pick project, log the chosen `project_root` in STEP 7's structured fields.
+- **Project picker with no `~/ClaudeProjects/` candidates** — the picker's candidate source is direct subdirectories of `~/ClaudeProjects/` with a `.claude/skills/` directory. If zero exist, the picker falls back to a free-text path prompt. If 1 exists, also fall back to free text (offering that candidate as the default) — `AskUserQuestion` requires 2-4 options. If the user gives no path, fall back to user-global.
 
 ---
 
