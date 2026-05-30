@@ -7,3 +7,7 @@ csm.log
 # Python bytecode cache (from running the suite's scripts)
 __pycache__/
 *.pyc
+
+# Session handoffs (written by /session-handoff save) are personal-context
+# files for picking the project up in a new session; they stay local.
+HANDOFF.md
