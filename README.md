@@ -71,7 +71,15 @@ Claude Code supports two scopes for installed skills, and the suite is aware of 
 | **`user`** *(default)* | `~/.claude/skills/<name>` | Every Claude Code session, anywhere |
 | **`project`** | `<project_root>/.claude/skills/<name>` | Only when launched inside that project tree |
 
-**`csm-skill-install` defaults to user-global**, so `/csm-skill-install <repo>` puts the skill in `~/.claude/skills/`. Pass **`--project`** to install into the current project instead — `/csm-skill-install <repo> --project` will create the symlink at `<project_root>/.claude/skills/<name>`. The git clone always goes to a shared `~/.agents/skills/<repo_name>/` regardless of scope, so a clone backing both user-global and project symlinks is updated by a single `git pull`.
+**`csm-skill-install` resolves scope automatically** based on how you invoke it:
+
+| Invocation | Behavior |
+| --- | --- |
+| `/csm-skill-install <repo>` *(no flag)* | Defaults to **user-global**. If you're inside a project (cwd has a `.claude/skills/` ancestor), it asks first via a quick prompt — *user-global*, *this project*, or *a different project…* (which opens a picker). |
+| `/csm-skill-install <repo> --project` | Installs into the project the current shell is inside (walks up from cwd to find it). If you're not in a project, a picker offers candidates from `~/ClaudeProjects/` that already have a `.claude/skills/` dir, plus a free-text "Other" path option. |
+| `/csm-skill-install <repo> --project <path>` | Installs into the specific project at `<path>`, regardless of where you're running from. Expands `~`, resolves relative paths, refuses if it resolves to `$HOME`. |
+
+**The git clone always goes to a shared `~/.agents/skills/<repo_name>/` regardless of scope**, so a single clone can back both user-global and project symlinks — one `git pull` updates everything.
 
 The other commands handle scope transparently: `csm-skill-audit --list` shows each skill's scope, `csm-skill-update` discovers and updates skills at both scopes when run inside a project, and `csm-skill-rollback` / `csm-skill-remove` ask you to disambiguate with `--scope user|project` if a skill happens to be installed at both.
 

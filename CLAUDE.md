@@ -42,7 +42,7 @@ Claude Code supports two skill scopes and the suite is aware of both:
 How each script handles it:
 - `audit.py`/`discover.py` walk up from cwd to detect a project root (first ancestor with `.claude/skills/`, stopping at `$HOME`). When found, they scan it *in addition to* `~/.claude/skills/` and tag each skill record with `scope` (`user`|`project`) and `project_root` (null for user).
 - `rollback_points.py` / `remove_plan.py` resolve a named skill at both scopes; if found in both, they return `status: "multiple-scopes"` with `alternative_scopes` and require the caller to re-run with `--scope user|project`.
-- `csm-skill-install`'s SKILL.md handles a `--project` flag: clone goes to `~/.agents/skills/<repo>`, symlink goes to `<project_root>/.claude/skills/<name>` (`mkdir -p` first); refuses `--project` when `cwd == $HOME`.
+- `csm-skill-install`'s SKILL.md resolves scope before STEP 5 via three rules: (1) `--project <path>` uses that exact path (expands `~`, refuses if it resolves to `$HOME`); (2) `--project` with no value walks up from cwd, falling back to a **project picker** that lists `~/ClaudeProjects/` subdirs with `.claude/skills/`; (3) no flag = silent user-global unless cwd is inside a project — in which case it asks via `AskUserQuestion` (with an "A different project…" option that also invokes the picker). Clone always goes to `~/.agents/skills/<repo>`; symlink goes to `<target_skills_dir>` (`mkdir -p` first).
 - `csm_log.py` accepts `--field scope=<...>` and `--field project_root=<...>`; install/update/rollback/remove all log these.
 
 ## Repository layout
