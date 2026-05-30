@@ -6,6 +6,18 @@ A suite of [Claude Code](https://claude.com/claude-code) skills for installing, 
 
 When a skill is installed by a plain file copy or download, it lives on your machine but has no link to its origin on GitHub. That means you can't check for updates, can't see what changed between versions, and can't roll back if an update breaks something. The skills in this suite install each skill as a git clone with a remote, so all of that becomes possible.
 
+## Requirements
+
+The installer and manual install steps below are **POSIX shell** — they work in:
+
+- **macOS** and **Linux** out of the box.
+- **Windows via WSL** (which is Linux under the hood).
+- **Windows via Git Bash / Cygwin / MSYS2** — should work, with one caveat: the suite relies on real symlinks (`ln -s`) to activate each skill, and on Windows that requires **Developer Mode** or admin. Without it, `ln -s` either fails or silently falls back to a copy, and Claude Code may not load the skill correctly.
+
+**Native Windows (CMD / PowerShell) isn't supported as-is** — no POSIX `sh`, no `ln -s`, no `mkdir -p`. Use WSL instead.
+
+You'll also need `git` and `curl` (for the quick install), plus [Claude Code](https://claude.com/claude-code) itself.
+
 ## Quick install
 
 ```sh
@@ -72,13 +84,38 @@ Several of the skills review skill code for risky behavior, at different moments
 - **`csm-skill-audit --scan`** runs an on-demand **deep security scan** across *every already-installed* skill — reading each skill's contents and reporting a per-skill and overall **security score** with findings grouped by severity. Run it directly, or accept the prompt offered at the end of a standard audit.
 - **`csm-skill-rollback`** checks the **target version** *before* rolling back — so reverting to an older version can't silently reintroduce a risky pattern that a later version fixed.
 
-These skills consult a shared pattern catalog, [`shared/security-patterns.md`](shared/security-patterns.md), which covers, at a high level:
+These skills consult a shared **pattern catalog**: [`shared/security-patterns.md`](shared/security-patterns.md).
 
-- **Shell execution** — `subprocess`, `exec`, `eval`, `os.system`, `child_process`, and similar
-- **Network activity** — `curl`/`wget`/`fetch` and requests to non-GitHub URLs
-- **Credential harvesting** — references to `API_KEY`, `TOKEN`, `~/.ssh`, `~/.aws`, and the like
-- **Obfuscation** — base64/hex-encoded strings and other attempts to hide intent
-- **Scope expansion** — file writes outside the skill directory, scripts that run automatically (e.g. `.github/` workflows, post-clone hooks), and changes that widen a skill's permissions
+### What the pattern catalog is
+
+A "pattern catalog" is just a structured list of **things to look for in code**. This one is a markdown file that lists concrete identifiers, function calls, and code snippets — for example `subprocess.run(`, `eval(`, `curl`, `~/.ssh`, `process.env.API_KEY`, base64-decoded strings — that the scanners search each skill's source files for. Every entry has a **priority tier** (High / Medium / Low — see the table below) and a category it belongs to.
+
+It's not a blocklist. A match means *"worth a second look,"* not *"definitely malware"* — the skill surfaces every finding in plain English and **you decide** whether to proceed.
+
+### What the catalog flags
+
+The catalog groups its entries into these categories (each one is a *kind of behavior* it has entries for):
+
+- **Shell execution** — code that runs external commands: `subprocess`, `exec`, `eval`, `os.system`, `child_process`, backtick execution, `$()` command substitution. *Why it's flagged:* shell execution lets a skill do anything the user can do at the command line, so any use is worth confirming it matches what the skill is supposed to do.
+- **Network activity** — outbound requests: `curl`, `wget`, `fetch()`, `axios`, `requests.get/post`, WebSocket connections, calls to raw IP addresses, requests to non-GitHub URLs. *Why it's flagged:* this is how a skill could quietly exfiltrate data or pull in unreviewed code at runtime.
+- **Credential harvesting** — references to credential-bearing locations (`$HOME`, `~/.ssh`, `~/.aws`, `~/.config`, `.env` files) or environment variables that conventionally hold secrets (`API_KEY`, `TOKEN`, `SECRET`, `PASSWORD`). *Why it's flagged:* a malicious skill would read your keys from exactly these places.
+- **Obfuscation** — base64/hex-encoded strings decoded at runtime, `eval()` on dynamic strings, minified or single-character variable names in new scripts. *Why it's flagged:* legitimate skills don't hide what their code does; obfuscation usually signals an attempt to evade review.
+- **Scope expansion** — file writes outside the skill's own folder (e.g. into `~/.claude/`, `~/.config/`, `/etc/`, `/usr/`), scripts that run automatically (`.github/` workflows, post-clone hooks), removal of confirmation prompts that previously existed, and new auto-apply or auto-execute behaviors. *Why it's flagged:* a skill widening its boundaries — especially mid-update — often means it's doing more than it claims.
+- **New external dependencies** — new `import` / `require` statements or new entries in `package.json` / `requirements.txt`. *Why it's flagged:* the new code came from somewhere you haven't reviewed yet.
+
+Each pattern in the catalog carries a **priority tier**, which the scan maps to the severity icons you'll see in its output:
+
+| Tier | Severity in scan | What it means |
+| --- | --- | --- |
+| High | 🔴 critical | Always flag — these patterns are risky regardless of context |
+| Medium | 🟡 warning | Flag with context — judged against what the skill is supposed to do |
+| Low | 🔵 info | Note but don't block (e.g. external documentation links) |
+
+A few sanity-checks the scan applies on top of the raw patterns:
+
+- **Documentation / comment matches are demoted to 🔵 info**, so a security-tooling skill that *mentions* `eval` or `subprocess` in its docs doesn't trip a false 🔴.
+- **Context-aware judgment** — `git` commands in a git-related skill, `curl` to a well-known docs URL, etc. get rated against the skill's stated purpose rather than treated as automatic criticals.
+- **Suite skills are tagged `is_suite_skill: true`** so the audit can contextualize findings inside this suite's own code (the install/update/audit skills legitimately consult these patterns).
 
 ### Running the deep security scan
 
